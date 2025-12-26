@@ -1,0 +1,823 @@
+"""
+打印工具模块
+"""
+from PyQt5.QtPrintSupport import QPrinter, QPrintDialog
+from PyQt5.QtWidgets import QApplication
+from PyQt5.QtGui import QPainter, QFont, QFontMetrics, QPen, QImage, QColor, QPixmap
+import tempfile
+import os
+from PyQt5.QtCore import Qt, QRect
+from datetime import datetime
+
+from services.payment_service import PaymentService
+
+
+class ReceiptPrinter:
+    """收据打印类"""
+    
+    # 预定义纸张尺寸 (毫米)
+    PAPER_SIZES = {
+        'A4': (210, 297),
+        '收据纸 (241×93mm)': (241, 93),
+        '收据纸 (80×200mm)': (80, 200),
+    }
+    
+    def __init__(self, paper_size='A4'):
+        self.paper_size = paper_size
+        self.printer = QPrinter(QPrinter.HighResolution)
+        
+        if paper_size in self.PAPER_SIZES:
+            w_mm, h_mm = self.PAPER_SIZES[paper_size]
+            from PyQt5.QtCore import QSizeF
+            self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
+        else:
+            self.printer.setPageSize(QPrinter.A4)
+        
+        # 根据纸张方向设置
+        # 所有纸张尺寸均已定义了准确的 W, H。对于自定义尺寸，使用 Portrait 模式通常能最准确地对应 (W, H)。
+        self.printer.setOrientation(QPrinter.Portrait)
+    
+    def print_receipt(self, payment_id, output_file: str = None):
+        """打印收据"""
+        try:
+            payment = PaymentService.get_payment_by_id(payment_id)
+            if not payment:
+                return False
+            # 如果指定了 output_file，则直接输出为 PDF，跳过打印对话框
+            if output_file:
+                # 如果是 PDF 输出，我们先渲染到一张高分辨率 PNG，再把该图像绘制到 QPrinter 以生成 PDF（兼容性更好）
+                if output_file.lower().endswith('.pdf'):
+                    # 先渲染到临时 PNG
+                    tmp_dir = tempfile.gettempdir()
+                    tmp_png = os.path.join(tmp_dir, f"receipt_tmp_{payment_id}.png")
+                    ok_img = self.render_receipt_to_image(payment_id, tmp_png, dpi=300)
+                    if not ok_img:
+                        return False
+                    # 设置打印机输出到 PDF 文件
+                    try:
+                        self.printer.setOutputFormat(QPrinter.PdfFormat)
+                        # 再次强制设置页面尺寸，防止 PDF 模式下重置为 A4
+                        if self.paper_size in self.PAPER_SIZES:
+                            w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+                            from PyQt5.QtCore import QSizeF
+                            self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
+                        self.printer.setOrientation(QPrinter.Portrait)
+                    except Exception:
+                        pass
+                    self.printer.setOutputFileName(output_file)
+                    # 将图片绘制到打印机页面
+                    painter = QPainter()
+                    if not painter.begin(self.printer):
+                        # 清理临时文件
+                        try:
+                            if os.path.exists(tmp_png):
+                                os.remove(tmp_png)
+                        except:
+                            pass
+                        return False
+                    try:
+                        image = QImage(tmp_png)
+                        
+                        # 获取页面绘制区域
+                        page_rect = self.printer.pageRect()
+                        rect = QRect(int(page_rect.x()), int(page_rect.y()), int(page_rect.width()), int(page_rect.height()))
+                        
+                        # 保持图片比例绘制，防止被强制拉伸
+                        # 计算保持比例的目标尺寸
+                        from PyQt5.QtCore import QSize
+                        target_size = image.size().scaled(rect.size(), Qt.KeepAspectRatio)
+                        
+                        # 居中显示
+                        x = rect.left() + (rect.width() - target_size.width()) // 2
+                        y = rect.top() + (rect.height() - target_size.height()) // 2
+                        target_rect = QRect(x, y, target_size.width(), target_size.height())
+                        
+                        painter.drawImage(target_rect, image)
+                    finally:
+                        painter.end()
+                        # 清理临时文件
+                        try:
+                            if os.path.exists(tmp_png):
+                                os.remove(tmp_png)
+                        except:
+                            pass
+                    return True
+                else:
+                    # 其他输出类型（例如直接打印到文件）仍按原先方式设置输出文件名
+                    try:
+                        self.printer.setOutputFormat(QPrinter.PdfFormat)
+                    except Exception:
+                        pass
+                    self.printer.setOutputFileName(output_file)
+            else:
+                # 显示打印对话框
+                print_dialog = QPrintDialog(self.printer)
+                if print_dialog.exec_() != QPrintDialog.Accepted:
+                    return False
+            
+            # 开始打印
+            painter = QPainter()
+            painter.begin(self.printer)
+            
+            # 将绘制部分委托给独立函数，便于同时支持打印机和图像渲染
+            page_rect = self.printer.pageRect()
+            self._draw_receipt(painter, page_rect, payment)
+            painter.end()
+            return True
+
+        except Exception as e:
+            print(f"打印失败: {str(e)}")
+            return False
+
+    def _num_to_rmb_upper(self, num):
+        """将数字金额转换为中文大写（人民币）简易实现，适用于0.00～999999999.99"""
+        units = ["元", "拾", "佰", "仟", "万", "拾", "佰", "仟", "亿"]
+        nums = ["零", "壹", "贰", "叁", "肆", "伍", "陆", "柒", "捌", "玖"]
+        if num is None:
+            return ""
+        try:
+            n = round(float(num) + 0.0000001, 2)
+        except:
+            return ""
+        integer = int(n)
+        fraction = int(round((n - integer) * 100))
+        if integer == 0:
+            int_part = "零元"
+        else:
+            int_part = ""
+            s = str(integer)[::-1]
+            for i, ch in enumerate(s):
+                digit = int(ch)
+                unit = units[i] if i < len(units) else ""
+                if digit != 0:
+                    int_part = nums[digit] + unit + int_part
+                else:
+                    # 避免连续零
+                    if not int_part.startswith("零"):
+                        int_part = "零" + int_part
+            int_part = int_part.rstrip("零")
+            if not int_part.endswith("元"):
+                int_part = int_part + "元"
+        # 小数部分
+        jiao = fraction // 10
+        fen = fraction % 10
+        frac_part = ""
+        if jiao == 0 and fen == 0:
+            frac_part = "整"
+        else:
+            if jiao > 0:
+                frac_part += nums[jiao] + "角"
+            if fen > 0:
+                frac_part += nums[fen] + "分"
+        return int_part + frac_part
+
+    def _draw_receipt(self, painter: QPainter, page_rect: QRect, payment):
+        """在给定 painter 和页面矩形上绘制收据（不负责 begin/end）"""
+        try:
+            width = page_rect.width()
+            height = page_rect.height()
+            
+            # 判断纸张类型：根据宽高比判断是否为小票纸
+            # A4: 210x297mm (比例 ~0.71), 241x93mm (比例 ~2.6, 横向), 80x200mm (比例 ~0.4)
+            aspect_ratio = width / height if height > 0 else 1.0
+            
+            # 小票纸特征：非常窄（80mm）或非常扁（241x93横向）
+            is_narrow_paper = width < height * 0.5  # 宽度小于高度一半（如80x200mm）
+            is_wide_paper = width > height * 2  # 宽度大于高度2倍（如241x93mm横向）
+            is_small_paper = is_narrow_paper or is_wide_paper
+            
+            # 布局策略：全部基于宽度的百分比计算 PixelSize，确保在任何 DPI 下字体相对纸张宽度的大小一致
+            # A4 纸宽较宽，正文字体占比可以小一些；小票纸窄，字体占比要大一些才能看清
+            if is_narrow_paper:
+                base_font_scale = 0.035  # 小票纸窄(80mm): 字体需较大
+                margin_scale = 0.02
+                line_spacing_scale = 0.04
+            elif is_wide_paper:
+                # 针式打印纸(241x93mm): 宽而扁，高度受限，必须大幅减小基于宽度的字号比例
+                base_font_scale = 0.013  # 1.3% width
+                margin_scale = 0.02
+                line_spacing_scale = 0.02
+            else:
+                # A4
+                base_font_scale = 0.018  # 1.8% width
+                margin_scale = 0.05
+                line_spacing_scale = 0.025
+
+            # 计算基准像素大小
+            base_pixel_size = int(width * base_font_scale)
+            
+            # 字体生成辅助函数
+            def get_font(size_factor, bold=False):
+                # 使用 setPixelSize 确保精确控制像素高度
+                f = QFont('SimSun')
+                f.setPixelSize(int(base_pixel_size * size_factor))
+                if bold:
+                    f.setBold(True)
+                return f
+
+            # 字体定义
+            company_font = get_font(1.8, True)   # 标题大字
+            title_font = get_font(1.6, True)     # 收据字样
+            normal_font = get_font(1.0)          # 正文
+            small_font = get_font(0.9)           # 小字
+            bold_font = get_font(1.0, True)      # 正文粗体
+
+            # 页面尺寸与边距
+            margin = int(width * margin_scale)
+            content_width = width - 2 * margin
+            y = margin
+            
+            # 行高计算
+            if is_wide_paper:
+                # 241x93高度极小，使用极紧凑行高
+                row_height = int(base_pixel_size * 1.5)
+            else:
+                row_height = int(base_pixel_size * 2.2)  # 行高为字号的 2.2 倍
+            
+            # 顶部公司名称（居中、加下划线效果用线）
+            # 尝试绘制LOGO
+            try:
+                logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.jpg')
+                if os.path.exists(logo_path):
+                    logo_pixmap = QPixmap(logo_path)
+                    if not logo_pixmap.isNull():
+                        # LOGO高度设为行高的2.5倍
+                        logo_h = int(row_height * 2.5)
+                        scaled_logo = logo_pixmap.scaledToHeight(logo_h, Qt.SmoothTransformation)
+                        # 绘制在 margin 左侧
+                        painter.drawPixmap(margin, y, scaled_logo)
+            except Exception:
+                pass
+
+            painter.setFont(company_font)
+            company_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(company_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
+            y += company_rect.height()
+            
+            # 下划线
+            x1 = int(margin + content_width * 0.1)
+            x2 = int(margin + content_width * 0.9)
+            y_line_int = int(y - row_height * 0.2) if is_wide_paper else int(y - row_height * 0.4) 
+            pen_width = max(1, int(width * 0.002))
+            old_pen = painter.pen()
+            thick_pen = QPen(Qt.black, pen_width)
+            painter.setPen(thick_pen)
+            painter.drawLine(x1, y_line_int, x2, y_line_int)
+            painter.setPen(old_pen)
+            y += int(row_height * 0.1) if is_wide_paper else int(row_height * 0.5)
+
+            # 收据大标题
+            painter.setFont(title_font)
+            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(title_rect, Qt.AlignCenter, "收费收据")
+            y += title_rect.height() + (0 if is_wide_paper else int(row_height * 0.5))
+            
+            # 收据编号
+            painter.setFont(normal_font)
+            # 表格宽度: 小票 100% content, A4 85% content
+            if is_small_paper:
+                table_width = content_width
+            else:
+                table_width = int(content_width * 0.9)
+            
+            start_x = margin + int((content_width - table_width) / 2)
+            
+            # 绘制编号
+            receipt_no = f"NO:{payment.id:06d}"
+            painter.drawText(QRect(start_x, y - row_height, table_width, row_height), Qt.AlignRight | Qt.AlignBottom, receipt_no)
+
+            # 定义列宽
+            if is_narrow_paper:
+                # 小票纸(80mm)：大幅压缩时间列，给项目和金额留空间
+                c1 = int(table_width * 0.25)
+                c2 = int(table_width * 0.35)
+                c3 = int(table_width * 0.22)
+                c4 = table_width - c1 - c2 - c3
+            else:
+                # A4 和 针式宽纸(241mm)：宽度充足，使用标准比例
+                c1 = int(table_width * 0.25)
+                c2 = int(table_width * 0.40)
+                c3 = int(table_width * 0.18)
+                c4 = table_width - c1 - c2 - c3
+            col_widths = [c1, c2, c3, c4]
+
+
+            # 户名、房号、日期一行（对齐到表格列）
+            info_y = y
+            now = datetime.now()
+            # 日期格式
+            if is_narrow_paper:
+                date_text = f"{now.year}.{now.month}.{now.day}"
+                info_text = f"户名:{payment.resident.name} 房号:{payment.resident.room_no}"
+            else:
+                date_text = f"日期：{now.year}年{now.month}月{now.day}日"
+                info_text = f"户名：{payment.resident.name}    房号：{payment.resident.room_no}"
+            
+            painter.drawText(QRect(start_x, info_y, c1 + c2, row_height), Qt.AlignLeft | Qt.AlignVCenter, info_text)
+            painter.drawText(QRect(start_x + c1 + c2, info_y, c3 + c4, row_height), Qt.AlignRight | Qt.AlignVCenter, date_text)
+            y += row_height + (0 if is_wide_paper else int(row_height * 0.2))
+
+            # 表格区域设置
+            table_top = y
+            if is_narrow_paper:
+                num_rows = 4
+            elif is_wide_paper:
+                num_rows = 3  # 针式打印纸(241x93)高度非常有限，只保留3行明细
+            else:
+                num_rows = 8
+            note_rows = 1
+            total_table_rows = 1 + num_rows + 1 + note_rows
+            table_height = total_table_rows * row_height
+
+            # 绘制外框与网格
+            pen = QPen(Qt.black)
+            pen.setWidth(max(1, int(width * 0.001))) # 细线
+            painter.setPen(pen)
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.drawRect(start_x, table_top, table_width, table_height)
+            for i in range(total_table_rows + 1):
+                y_line = int(table_top + i * row_height)
+                painter.drawLine(start_x, y_line, start_x + table_width, y_line)
+            
+            # 竖线
+            x_acc = start_x
+            painter.drawLine(x_acc, table_top, x_acc, table_top + table_height)
+            for w in col_widths:
+                x_acc += w
+                painter.drawLine(x_acc, table_top, x_acc, table_top + table_height)
+            
+            # 恢复默认笔
+            default_pen = QPen(Qt.black)
+            default_pen.setWidth(0)
+            painter.setPen(default_pen)
+
+            # 表头
+            painter.setFont(bold_font)
+            headers = ["收费项目", "起止时间", "金额(元)", "备注"]
+            x = start_x
+            h_padding = int(row_height * 0.2)
+            for idx, header in enumerate(headers):
+                w = col_widths[idx]
+                painter.drawText(QRect(x + 2, y, w - 4, row_height), Qt.AlignCenter, header)
+                x += w
+            y += row_height
+
+            # 明细行
+            painter.setFont(normal_font)
+            for r in range(num_rows):
+                # 填充第一行数据
+                if r == 0:
+                    item_name = payment.charge_item.name if payment.charge_item else ""
+                    billing_period = ""
+                    if payment.billing_start_date and payment.billing_end_date:
+                        if is_small_paper:
+                             billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{payment.billing_end_date.strftime('%y.%m.%d')}"
+                        else:
+                             billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
+                    amount_text = f"{float(payment.amount):.2f}"
+                    
+                    x = start_x
+                    painter.drawText(QRect(x + 2, y, col_widths[0] - 4, row_height), Qt.AlignLeft | Qt.AlignVCenter, item_name)
+                    x += col_widths[0]
+                    # 时间居中缩小字体? 已经在上面调整了列宽，这里正常居中
+                    # 如果小票纸，字体可能还需要再小一点点防止换行
+                    if is_small_paper: painter.setFont(small_font)
+                    painter.drawText(QRect(x + 1, y, col_widths[1] - 2, row_height), Qt.AlignCenter, billing_period)
+                    if is_small_paper: painter.setFont(normal_font)
+                    x += col_widths[1]
+                    painter.drawText(QRect(x + 1, y, col_widths[2] - 2, row_height), Qt.AlignCenter, amount_text)
+                    # 备注留空
+                y += row_height
+
+            # 如果有实付信息
+            if getattr(payment, 'paid_months', 0) and payment.paid_months > 0 and payment.billing_start_date:
+                try:
+                    def add_months(dt, months):
+                        month = dt.month - 1 + months
+                        year = dt.year + month // 12
+                        month = month % 12 + 1
+                        import calendar
+                        day = min(dt.day, calendar.monthrange(year, month)[1])
+                        return dt.replace(year=year, month=month, day=day)
+                    start = payment.billing_start_date
+                    end_paid = add_months(start, int(payment.paid_months))
+                    if is_small_paper:
+                        paid_period_text = f"{start.strftime('%y.%m.%d')}-{end_paid.strftime('%y.%m.%d')}"
+                    else:
+                        paid_period_text = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
+                    paid_amount_text = f"{float(payment.paid_amount):.2f}" if payment.paid_amount else "0.00"
+                    
+                    # 第一行：实收周期
+                    note_y = y
+                    painter.fillRect(start_x + 1, note_y + 1, table_width - 2, row_height - 2, QColor('white'))
+                    # 重新画外框(已被覆盖)，其实不需要，因为网格已经画了，我们只要把中间竖线盖住即可
+                    # 简单起见，覆盖后重画文字即可
+                    painter.drawText(QRect(start_x + 5, note_y, table_width - 10, row_height), Qt.AlignLeft | Qt.AlignVCenter, f"实收周期: {paid_period_text}")
+                    
+                    y += row_height
+                    # 第二行：实收金额
+                    note_y = y
+                    painter.fillRect(start_x + 1, note_y + 1, table_width - 2, row_height - 2, QColor('white'))
+                    painter.drawText(QRect(start_x + 5, note_y, table_width - 10, row_height), Qt.AlignLeft | Qt.AlignVCenter, f"实收金额: {paid_amount_text}")
+                    y += row_height
+                except Exception as _:
+                    # 回退 y
+                    y = table_top + (1 + num_rows) * row_height
+                    pass
+            else:
+                 y = table_top + (1 + num_rows) * row_height
+
+            # 合计行
+            total_y = y
+            painter.setFont(bold_font)
+            painter.drawText(QRect(start_x + 2, total_y, col_widths[0] - 4, row_height), Qt.AlignLeft | Qt.AlignVCenter, "合计大写")
+            
+            try:
+                total_amount = float(payment.amount) if payment.amount else 0.0
+            except:
+                total_amount = 0.0
+            try:
+                paid_amount = float(payment.paid_amount) if getattr(payment, 'paid_amount', None) else 0.0
+            except:
+                paid_amount = 0.0
+            display_amount = paid_amount if paid_amount > 0 else total_amount
+            upper_amount = self._num_to_rmb_upper(display_amount)
+            painter.drawText(QRect(start_x + c1, total_y, c2, row_height), Qt.AlignCenter | Qt.AlignVCenter, upper_amount)
+            painter.setFont(bold_font)
+            painter.drawText(QRect(start_x + c1 + c2, total_y, c3, row_height), Qt.AlignLeft | Qt.AlignVCenter, "合计小写")
+            painter.setFont(normal_font)
+            painter.drawText(QRect(start_x + c1 + c2 + c3, total_y, c4, row_height), Qt.AlignCenter | Qt.AlignVCenter, f"{display_amount:.2f}元")
+            y += row_height
+
+            # 提示行
+            note_y = y
+            painter.fillRect(start_x + 1, note_y + 1, table_width - 2, row_height - 2, QColor('white'))
+            painter.drawText(QRect(start_x + 5, note_y, table_width - 10, row_height), Qt.AlignLeft | Qt.AlignVCenter, "请确认您的缴费金额，如有疑问请咨询物业服务中心")
+            y += row_height + (0 if is_wide_paper else int(row_height * 0.5))
+
+            # 底部签名
+            sig_height = row_height
+            # 改为紧跟内容下方，宽纸模式下尽量紧凑
+            sig_offset = 0 if is_wide_paper else int(row_height * 0.5)
+            sig_y = y + sig_offset
+            
+            left_x = start_x
+            right_x = start_x + int(table_width / 2)
+            painter.drawText(QRect(left_x, sig_y, int(table_width/2), sig_height), Qt.AlignLeft | Qt.AlignVCenter, "收款人:")
+            painter.drawText(QRect(right_x, sig_y, int(table_width/2), sig_height), Qt.AlignLeft | Qt.AlignVCenter, "收款单位盖章:")
+        except Exception as e:
+            # 在绘制层捕获异常以便调用者（打印或图像保存）能收到失败信号
+            print(f"_draw_receipt 失败: {e}")
+            raise
+
+
+    def render_receipt_to_image(self, payment_id, output_path, dpi=300):
+        """将收据渲染为高分辨率 PNG 图像并保存"""
+        try:
+            payment = PaymentService.get_payment_by_id(payment_id)
+            if not payment:
+                return False
+            
+            # 获取当前纸张尺寸（毫米）
+            if self.paper_size in self.PAPER_SIZES:
+                w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+                # 如果是横向打印（如241x93），需要交换宽高或者是打印机驱动处理，但对于绘图来说，canvas 尺寸应对应物理纸张
+                # 注意：Qt打印机 Landscape 模式下 pageRect 会自动旋转，但 QImage 需要我们自己设定尺寸
+                # 这里为了简单起见，如果定义的尺寸就是物理尺寸，我们直接使用
+                # 但如果是 Landscape，通常意味着宽 > 高，241x93 本身就是宽>高，所以直接用即可
+                pass
+            else:
+                w_mm, h_mm = 210.0, 297.0  # Default A4
+
+            # 转换为像素
+            mm_per_inch = 25.4
+            width_px = int(w_mm / mm_per_inch * dpi)
+            height_px = int(h_mm / mm_per_inch * dpi)
+            
+            image = QImage(width_px, height_px, QImage.Format_ARGB32)
+            image.fill(Qt.white)
+            painter = QPainter()
+            painter.begin(image)
+            
+            # 使用与打印器相同的 page_rect（像素坐标）
+            page_rect = QRect(0, 0, width_px, height_px)
+            self._draw_receipt(painter, page_rect, payment)
+            painter.end()
+            # 保存图像（PNG）
+            ok = image.save(output_path)
+            return ok
+        except Exception as e:
+            print(f"render_receipt_to_image 失败: {e}")
+            return False
+
+    def print_merged_receipt(self, payment_ids, output_file: str = None):
+        """合并打印多笔账单到一张收据（payment_ids 为列表）"""
+        try:
+            if not payment_ids:
+                return False
+            payments = []
+            for pid in payment_ids:
+                p = PaymentService.get_payment_by_id(pid)
+                if p:
+                    payments.append(p)
+            if not payments:
+                return False
+
+            # 如果指定了 output_file 则先渲染为 PNG，再输出到 PDF（与单据相同策略）
+            if output_file and output_file.lower().endswith('.pdf'):
+                tmp_dir = tempfile.gettempdir()
+                tmp_png = os.path.join(tmp_dir, f"receipt_merged_tmp.png")
+                ok_img = self.render_merged_receipt_to_image(payments, tmp_png, dpi=300)
+                if not ok_img:
+                    return False
+                try:
+                    self.printer.setOutputFormat(QPrinter.PdfFormat)
+                    # 强制重新设置页面尺寸，防止 PDF 模式下重置为 A4
+                    if self.paper_size in self.PAPER_SIZES:
+                        w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+                        from PyQt5.QtCore import QSizeF
+                        self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
+                    self.printer.setOrientation(QPrinter.Portrait)
+                except Exception:
+                    pass
+                self.printer.setOutputFileName(output_file)
+                painter = QPainter()
+                if not painter.begin(self.printer):
+                    try:
+                        if os.path.exists(tmp_png):
+                            os.remove(tmp_png)
+                    except:
+                        pass
+                    return False
+                try:
+                    image = QImage(tmp_png)
+                    page_rect = self.printer.pageRect()
+                    rect = QRect(int(page_rect.x()), int(page_rect.y()), int(page_rect.width()), int(page_rect.height()))
+                    
+                    # 保持图片比例绘制
+                    from PyQt5.QtCore import QSize
+                    target_size = image.size().scaled(rect.size(), Qt.KeepAspectRatio)
+                    
+                    # 居中显示
+                    x = rect.left() + (rect.width() - target_size.width()) // 2
+                    y = rect.top() + (rect.height() - target_size.height()) // 2
+                    target_rect = QRect(x, y, target_size.width(), target_size.height())
+                    
+                    painter.drawImage(target_rect, image)
+                finally:
+                    painter.end()
+                    try:
+                        if os.path.exists(tmp_png):
+                            os.remove(tmp_png)
+                    except:
+                        pass
+                return True
+
+            # 否则显示打印对话框并打印
+            print_dialog = QPrintDialog(self.printer)
+            if print_dialog.exec_() != QPrintDialog.Accepted:
+                return False
+
+            painter = QPainter()
+            painter.begin(self.printer)
+            page_rect = self.printer.pageRect()
+            self._draw_merged_receipt(painter, page_rect, payments)
+            painter.end()
+            return True
+        except Exception as e:
+            print(f"print_merged_receipt 失败: {e}")
+            return False
+
+    def _draw_merged_receipt(self, painter: QPainter, page_rect: QRect, payments: list):
+        """在单页内绘制多笔账单的合并收据（多行明细）"""
+        try:
+            width = page_rect.width()
+            height = page_rect.height()
+
+            # 布局参数计算（复用 _draw_receipt 的逻辑）
+            # 判断纸张类型
+            is_narrow_paper = width < height * 0.5
+            is_wide_paper = width > height * 2
+            is_small_paper = is_narrow_paper or is_wide_paper
+            
+            # 布局策略：基于宽度计算 PixelSize
+            # 布局策略：基于宽度计算 PixelSize
+            if is_wide_paper:
+                base_font_scale = 0.013  # 宽纸需较小比例，避免字体过大
+                margin_scale = 0.02
+                table_width_pct = 0.98
+                row_height_factor = 1.5
+            elif is_narrow_paper:
+                base_font_scale = 0.035
+                margin_scale = 0.02
+                table_width_pct = 0.98
+                row_height_factor = 2.2
+            else:
+                base_font_scale = 0.018
+                margin_scale = 0.05
+                table_width_pct = 0.90
+                row_height_factor = 2.2
+
+            base_pixel_size = int(width * base_font_scale)
+            
+            def get_font(size_factor, bold=False):
+                f = QFont('SimSun')
+                f.setPixelSize(int(base_pixel_size * size_factor))
+                if bold: f.setBold(True)
+                return f
+
+            company_font = get_font(1.8, True)
+            title_font = get_font(1.6, True)
+            normal_font = get_font(1.0)
+            small_font = get_font(0.9)
+            bold_font = get_font(1.0, True)
+            
+            row_height = int(base_pixel_size * row_height_factor)
+
+            # 边距
+            margin = int(width * margin_scale)
+            content_width = width - 2 * margin
+            y = margin
+
+            # 绘制LOGO
+            try:
+                logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'logo.jpg')
+                if os.path.exists(logo_path):
+                    logo_pixmap = QPixmap(logo_path)
+                    if not logo_pixmap.isNull():
+                        # LOGO高度设为行高的2.5倍
+                        logo_h = int(row_height * 2.5)
+                        scaled_logo = logo_pixmap.scaledToHeight(logo_h, Qt.SmoothTransformation)
+                        painter.drawPixmap(margin, y, scaled_logo)
+            except Exception:
+                pass
+
+            # 标题区域
+            painter.setFont(company_font)
+            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(title_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
+            # 宽纸且空间紧凑时，减少间距
+            y += title_rect.height()
+            if not is_wide_paper:
+                 y += int(row_height * 0.2)
+            
+            painter.setFont(title_font)
+            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(title_rect, Qt.AlignCenter, "收费收据（合并）")
+            y += title_rect.height()
+            if not is_wide_paper:
+                y += int(row_height * 0.5)
+
+            # 表格
+            table_width = int(content_width * table_width_pct)
+            start_x = margin + int((content_width - table_width) / 2)
+            
+            # 列宽分配
+            if is_small_paper:
+                col_widths = [int(table_width * 0.22), int(table_width * 0.38), int(table_width * 0.22), int(table_width * 0.18)]
+            else:
+                col_widths = [int(table_width * 0.25), int(table_width * 0.40), int(table_width * 0.18), int(table_width * 0.17)]
+            
+            if is_wide_paper:
+                num_rows = max(1, len(payments))
+            elif is_narrow_paper:
+                num_rows = max(4, len(payments))
+            else:
+                num_rows = max(8, len(payments))
+            total_table_rows = 1 + num_rows + 1 + 1
+            table_height = total_table_rows * row_height
+
+            pen = QPen(Qt.black)
+            pen.setWidth(max(1, int(width * 0.001)))
+            painter.setPen(pen)
+            painter.setRenderHint(QPainter.Antialiasing, False)
+            painter.drawRect(start_x, y, table_width, table_height)
+            for i in range(total_table_rows + 1):
+                y_line = int(y + i * row_height)
+                painter.drawLine(start_x, y_line, start_x + table_width, y_line)
+
+            x_acc = int(start_x)
+            painter.drawLine(x_acc, int(y), x_acc, int(y + table_height))
+            for w in col_widths:
+                x_acc += int(w)
+                painter.drawLine(x_acc, int(y), x_acc, int(y + table_height))
+            
+            default_pen = QPen(Qt.black)
+            default_pen.setWidth(0)
+            painter.setPen(default_pen)
+
+            # 表头
+            painter.setFont(bold_font)
+            headers = ["收费项目", "起止时间", "金额（元）", "备注"]
+            x = start_x
+            for idx, header in enumerate(headers):
+                w = col_widths[idx]
+                painter.drawText(QRect(int(x + 6), int(y + 4), int(w - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignVCenter, header)
+                x += w
+            y += row_height
+            
+            painter.setFont(normal_font)
+            total_amount = 0.0
+            total_paid_amount = 0.0
+            for idx, p in enumerate(payments):
+                if idx >= num_rows:
+                    break
+                item_name = p.charge_item.name if p.charge_item else ""
+                # 如果存在已缴月数或已缴金额，优先显示实付周期与实付金额；否则显示账单周期与总额
+                billing_period_line = ""
+                try:
+                    def add_months(dt, months):
+                        month = dt.month - 1 + months
+                        year = dt.year + month // 12
+                        month = month % 12 + 1
+                        import calendar
+                        day = min(dt.day, calendar.monthrange(year, month)[1])
+                        return dt.replace(year=year, month=month, day=day)
+
+                    if getattr(p, 'paid_months', 0) and p.paid_months > 0 and p.billing_start_date:
+                        start_paid = p.billing_start_date
+                        end_paid = add_months(start_paid, int(p.paid_months))
+                        billing_period_line = f"{start_paid.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
+                    else:
+                        billing_period_line = f"{p.billing_start_date.strftime('%Y.%m.%d')}–{p.billing_end_date.strftime('%Y.%m.%d')}" if p.billing_start_date and p.billing_end_date else (p.period or "")
+                except Exception:
+                    billing_period_line = f"{p.period or ''}"
+
+                try:
+                    display_line_amount = float(p.paid_amount) if getattr(p, 'paid_amount', None) and float(p.paid_amount) > 0 else float(p.amount or 0.0)
+                except Exception:
+                    display_line_amount = float(p.amount or 0.0)
+
+                amount_text = f"{display_line_amount:.2f}"
+                painter.drawText(QRect(int(start_x + 6), int(y + 4), int(col_widths[0] - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignVCenter, item_name)
+                painter.drawText(QRect(int(start_x + col_widths[0] + 6), int(y + 4), int(col_widths[1] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, billing_period_line)
+                painter.drawText(QRect(int(start_x + col_widths[0] + col_widths[1] + 6), int(y + 4), int(col_widths[2] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, amount_text)
+                y += row_height
+                total_amount += float(p.amount or 0.0)
+                total_paid_amount += float(p.paid_amount or 0.0)
+
+            # 合计行显示：优先显示已缴合计，否则显示账单合计
+            display_amount = total_paid_amount if total_paid_amount > 0 else total_amount
+            painter.setFont(bold_font)
+            total_y = y
+            painter.drawText(QRect(int(start_x + 6), int(total_y + 4), int(col_widths[0] - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignVCenter, "合计金额大写")
+            upper_amount = self._num_to_rmb_upper(display_amount)
+            painter.setFont(normal_font)
+            painter.drawText(QRect(int(start_x + col_widths[0] + 6), int(total_y + 4), int(col_widths[1] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, upper_amount)
+            painter.setFont(bold_font)
+            painter.drawText(QRect(int(start_x + col_widths[0] + col_widths[1] + 6), int(total_y + 4), int(col_widths[2] - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignVCenter, "合计金额小写")
+            painter.setFont(normal_font)
+            painter.drawText(QRect(int(start_x + col_widths[0] + col_widths[1] + col_widths[2] + 6), int(total_y + 4), int(col_widths[3] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, f"{display_amount:.2f}元")
+            y = total_y + row_height
+
+            # 提示行
+            note_y = y
+            painter.fillRect(int(start_x), int(note_y), int(table_width), int(row_height), QColor('white'))
+            pen2 = QPen(Qt.black)
+            pen2.setWidth(1)
+            painter.setPen(pen2)
+            painter.drawRect(int(start_x), int(note_y), int(table_width), int(row_height))
+            painter.setPen(default_pen)
+            painter.drawText(QRect(int(start_x + 6), int(note_y + 6), int(table_width - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignTop, "请确认您的缴费金额，如有疑问请咨询物业服务中心")
+            y = note_y + row_height + 10
+
+            # 底部签名
+            painter.setFont(small_font)
+            if is_wide_paper or is_narrow_paper:
+                # 紧凑模式：紧跟内容
+                sig_y = y
+            else:
+                # 标准模式：尝试置于底部，但确保不覆盖内容
+                bottom_y = int(page_rect.y() + (page_rect.height()) - margin - 60)
+                sig_y = max(y + 20, bottom_y)
+            left_x = int(start_x)
+            right_x = int(start_x + table_width - int(table_width / 2))
+            painter.drawText(QRect(left_x, int(sig_y), int(table_width / 2), 20), Qt.AlignLeft, "收款人：")
+            painter.drawText(QRect(right_x, int(sig_y), int(table_width / 2), 20), Qt.AlignLeft, "收款单位盖章：")
+        except Exception as e:
+            print(f"_draw_merged_receipt 失败: {e}")
+            raise
+
+    def render_merged_receipt_to_image(self, payments, output_path, dpi=300):
+        """将合并收据渲染为 PNG（payments 为 payment 对象列表）"""
+        try:
+            if self.paper_size in self.PAPER_SIZES:
+                w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+            else:
+                w_mm, h_mm = 210.0, 297.0
+            mm_per_inch = 25.4
+            width_px = int(w_mm / mm_per_inch * dpi)
+            height_px = int(h_mm / mm_per_inch * dpi)
+            image = QImage(width_px, height_px, QImage.Format_ARGB32)
+            image.fill(Qt.white)
+            painter = QPainter()
+            painter.begin(image)
+            page_rect = QRect(0, 0, width_px, height_px)
+            self._draw_merged_receipt(painter, page_rect, payments)
+            painter.end()
+            ok = image.save(output_path)
+            return ok
+        except Exception as e:
+            # 把异常向上抛出以便调用方能够获得详细错误信息用于调试
+            raise
+

@@ -1,0 +1,10 @@
+# Windows 7 兼容版本依赖
+# Python 3.8.10 是最后一个官方支持 Windows 7 的 Python 版本
+
+PyQt5==5.15.10          # 保持不变，支持 Windows 7
+SQLAlchemy==1.4.46      # 从 2.0.23 降级到 1.4.46（最后支持 Python 3.8 的稳定版）
+pyinstaller==4.10       # 从 6.2.0 降级到 4.10（最后支持 Windows 7 的稳定版）
+openpyxl==3.1.2         # 保持不变，支持 Python 3.8
+pandas==1.5.3           # 从 2.0.3 降级到 1.5.3（最后支持 Python 3.8 的稳定版）
+pytest==7.4.3           # 保持不变（可选，用于测试）
+

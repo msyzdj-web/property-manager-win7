@@ -1,0 +1,1 @@
+e:/桌面/wykf/.venv/Scripts/python.exe e:/桌面/wykf/main.py
