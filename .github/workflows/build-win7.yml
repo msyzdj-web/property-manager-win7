@@ -42,7 +42,11 @@ jobs:
 
       - name: List build output
         run: |
-          dir dist /s /b || echo "dist not found"
+          if (Test-Path -Path "dist") {
+            Get-ChildItem -Path dist -Recurse -File | ForEach-Object { Write-Output $_.FullName }
+          } else {
+            Write-Output "dist not found"
+          }
 
       - name: Archive onedir and upload artifact
         run: |
