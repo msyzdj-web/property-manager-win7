@@ -1,0 +1,10 @@
+# 替换下面的用户名，然后执行这些命令
+
+# 1. 添加远程仓库（替换为你的 GitHub 用户名）
+git remote add origin https://github.com/你的用户名/property-manager-win7.git
+
+# 2. 推送代码
+git push -u origin main
+
+# 如果分支名是 master，使用：
+git push -u origin master

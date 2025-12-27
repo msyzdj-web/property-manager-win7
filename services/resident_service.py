@@ -1,0 +1,171 @@
+"""
+住户管理服务
+"""
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from models.resident import Resident
+from models.database import SessionLocal
+
+
+class ResidentService:
+    """住户管理服务类"""
+    
+    @staticmethod
+    def get_all_residents(db: Session = None, active_only: bool = False):
+        """获取所有住户"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            query = db.query(Resident)
+            if active_only:
+                query = query.filter(Resident.status == 1)
+            return query.order_by(Resident.room_no).all()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def get_resident_by_id(resident_id: int, db: Session = None):
+        """根据ID获取住户"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            return db.query(Resident).filter(Resident.id == resident_id).first()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def get_resident_by_room_no(room_no: str, db: Session = None):
+        """根据房号获取住户"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            return db.query(Resident).filter(Resident.room_no == room_no).first()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def create_resident(room_no: str, name: str, phone: str = '', area: float = 0.0, 
+                       move_in_date=None, identity: str = 'owner', property_type: str = 'residential', db: Session = None):
+        """创建住户"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 检查房号是否已存在
+            existing = ResidentService.get_resident_by_room_no(room_no, db)
+            if existing:
+                raise ValueError(f"房号 {room_no} 已存在")
+            
+            resident = Resident(
+                room_no=room_no,
+                name=name,
+                phone=phone,
+                area=area,
+                move_in_date=move_in_date,
+                identity=identity,
+                property_type=property_type,
+                status=1
+            )
+            db.add(resident)
+            db.commit()
+            db.refresh(resident)
+            return resident
+        except IntegrityError:
+            db.rollback()
+            raise ValueError(f"房号 {room_no} 已存在")
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def update_resident(resident_id: int, room_no: str = None, name: str = None, 
+                       phone: str = None, area: float = None, move_in_date=None, 
+                       status: int = None, identity: str = None, property_type: str = None, db: Session = None):
+        """更新住户信息"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            resident = db.query(Resident).filter(Resident.id == resident_id).first()
+            if not resident:
+                raise ValueError("住户不存在")
+            
+            # 如果修改房号，检查是否重复
+            if room_no and room_no != resident.room_no:
+                existing = ResidentService.get_resident_by_room_no(room_no, db)
+                if existing and existing.id != resident_id:
+                    raise ValueError(f"房号 {room_no} 已存在")
+                resident.room_no = room_no
+            
+            if name is not None:
+                resident.name = name
+            if phone is not None:
+                resident.phone = phone
+            if area is not None:
+                resident.area = area
+            if move_in_date is not None:
+                resident.move_in_date = move_in_date
+            if identity is not None:
+                resident.identity = identity
+            if property_type is not None:
+                resident.property_type = property_type
+            if status is not None:
+                resident.status = status
+            
+            db.commit()
+            db.refresh(resident)
+            return resident
+        except IntegrityError:
+            db.rollback()
+            raise ValueError(f"房号 {room_no} 已存在")
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def delete_resident(resident_id: int, db: Session = None):
+        """删除住户"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            resident = db.query(Resident).filter(Resident.id == resident_id).first()
+            if not resident:
+                raise ValueError("住户不存在")
+            
+            # 检查是否有缴费记录
+            from models.payment import Payment
+            payment_count = db.query(Payment).filter(Payment.resident_id == resident_id).count()
+            if payment_count > 0:
+                raise ValueError(f"该住户有 {payment_count} 条缴费记录，无法删除")
+            
+            db.delete(resident)
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def search_residents(keyword: str, db: Session = None):
+        """搜索住户（按房号或姓名）"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            keyword = f"%{keyword}%"
+            return db.query(Resident).filter(
+                (Resident.room_no.like(keyword)) | (Resident.name.like(keyword))
+            ).order_by(Resident.room_no).all()
+        finally:
+            if db is not None:
+                db.close()
+

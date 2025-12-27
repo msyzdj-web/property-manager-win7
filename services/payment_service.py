@@ -1,0 +1,394 @@
+"""
+缴费管理服务
+"""
+from datetime import datetime
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import and_, func
+from models.payment import Payment
+from models.resident import Resident
+from models.charge_item import ChargeItem
+from models.database import SessionLocal
+from decimal import Decimal, ROUND_HALF_UP
+
+
+class PaymentService:
+    """缴费管理服务类"""
+    
+    @staticmethod
+    def get_all_payments(db: Session = None):
+        """获取所有缴费记录"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 使用joinedload预加载关联对象，避免DetachedInstanceError
+            return db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            ).order_by(Payment.period.desc(), Payment.created_at.desc()).all()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def get_payment_by_id(payment_id: int, db: Session = None):
+        """根据ID获取缴费记录"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 使用joinedload预加载关联对象，避免DetachedInstanceError
+            return db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            ).filter(Payment.id == payment_id).first()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def get_payments_by_period(period: str, db: Session = None):
+        """根据周期获取缴费记录"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 使用joinedload预加载关联对象，避免DetachedInstanceError
+            return db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            ).filter(Payment.period == period).order_by(
+                Payment.paid, Payment.created_at.desc()
+            ).all()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def get_unpaid_payments_by_period(period: str, db: Session = None):
+        """根据周期获取未缴费记录"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 使用joinedload预加载关联对象，避免DetachedInstanceError
+            return db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            ).filter(
+                and_(Payment.period == period, Payment.paid == 0)
+            ).order_by(Payment.created_at.desc()).all()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def get_payments_by_resident(resident_id: int, db: Session = None):
+        """根据住户获取缴费记录"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 使用joinedload预加载关联对象，避免DetachedInstanceError
+            return db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            ).filter(Payment.resident_id == resident_id).order_by(
+                Payment.period.desc(), Payment.created_at.desc()
+            ).all()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def create_payment(resident_id: int, charge_item_id: int, period: str, 
+                      billing_start_date, billing_end_date, billing_months: int,
+                      amount: float, db: Session = None):
+        """创建缴费记录（生成账单）
+        
+        Args:
+            resident_id: 住户ID
+            charge_item_id: 收费项目ID
+            period: 缴费周期（格式：YYYY-MM）
+            billing_start_date: 计费开始日期
+            billing_end_date: 计费结束日期
+            billing_months: 计费周期数（月数）
+            amount: 总金额
+        """
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 计算并规范化 billing_months，确保与开始/结束日期一致
+            def calc_months(start_date, end_date):
+                if not start_date or not end_date:
+                    return billing_months if billing_months and billing_months > 0 else 1
+                years = end_date.year - start_date.year
+                months = years * 12 + (end_date.month - start_date.month)
+                if end_date.day >= start_date.day:
+                    months += 1
+                return months if months > 0 else 1
+
+            billing_months = calc_months(billing_start_date, billing_end_date)
+
+            payment = Payment(
+                resident_id=resident_id,
+                charge_item_id=charge_item_id,
+                period=period,
+                billing_start_date=billing_start_date,
+                billing_end_date=billing_end_date,
+                billing_months=billing_months,
+                paid_months=0,
+                amount=amount,
+                paid_amount=0,
+                paid=0
+            )
+            db.add(payment)
+            db.commit()
+            db.refresh(payment)
+            # 在关闭会话前加载关联对象，避免DetachedInstanceError
+            _ = payment.resident
+            _ = payment.charge_item
+            return payment
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def mark_paid(payment_id: int, paid_months: int = None, operator: str = '', db: Session = None):
+        """标记为已缴费（支持部分缴费）
+        
+        Args:
+            payment_id: 缴费记录ID
+            paid_months: 缴费周期数（月数），如果为None则缴清全部
+            operator: 操作员
+        """
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 使用joinedload预加载关联对象，避免DetachedInstanceError
+            payment = db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            ).filter(Payment.id == payment_id).first()
+            if not payment:
+                raise ValueError("缴费记录不存在")
+            
+            # 如果未指定缴费月数，则缴清全部
+            if paid_months is None:
+                paid_months = payment.billing_months - payment.paid_months
+            
+            # 检查缴费月数是否超过剩余未缴费月数
+            remaining_months = payment.billing_months - payment.paid_months
+            if paid_months > remaining_months:
+                raise ValueError(f"缴费月数不能超过剩余未缴费月数（剩余{remaining_months}月）")
+            
+            if paid_months <= 0:
+                raise ValueError("缴费月数必须大于0")
+            
+            # 计算本次缴费金额（按比例计算）
+            # 按月分摊并四舍五入到整数元（元）
+            try:
+                monthly_amount_raw = Decimal(str(payment.amount)) / Decimal(str(payment.billing_months))
+            except Exception:
+                monthly_amount_raw = Decimal(str(float(payment.amount) / payment.billing_months))
+            monthly_amount = int(monthly_amount_raw.quantize(0, rounding=ROUND_HALF_UP))
+            paid_amount_this_time = int((monthly_amount_raw * Decimal(str(paid_months))).quantize(0, rounding=ROUND_HALF_UP))
+            
+            # 更新缴费信息
+            payment.paid_months += paid_months
+            # 累加已交金额（保持为数值）
+            try:
+                prev_paid = Decimal(str(payment.paid_amount or 0))
+            except Exception:
+                prev_paid = Decimal(str(float(payment.paid_amount or 0.0)))
+            payment.paid_amount = float((prev_paid + Decimal(str(paid_amount_this_time))))
+
+            # 记录最近一次缴费时间（即便是部分缴费也记录时间）
+            payment.paid_time = datetime.now()
+
+            # 如果全部缴清，标记为已缴费
+            if payment.paid_months >= payment.billing_months:
+                payment.paid = 1
+            
+            payment.operator = operator
+
+            # 创建流水记录（使用同一 db session）
+            try:
+                from services.payment_transaction_service import PaymentTransactionService
+                PaymentTransactionService.create_transaction(payment_id=payment.id, amount=paid_amount_this_time, operator=operator, db=db)
+            except Exception:
+                # 流水失败不应该阻止主流程，记录但继续
+                import traceback
+                print("记录付款流水失败：", traceback.format_exc())
+
+            db.commit()
+            db.refresh(payment)
+            # 确保关联对象已加载
+            _ = payment.resident
+            _ = payment.charge_item
+            return payment
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def mark_unpaid(payment_id: int, db: Session = None):
+        """标记为未缴费"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 使用joinedload预加载关联对象，避免DetachedInstanceError
+            payment = db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            ).filter(Payment.id == payment_id).first()
+            if not payment:
+                raise ValueError("缴费记录不存在")
+            
+            payment.paid = 0
+            payment.paid_time = None
+            payment.operator = None
+            
+            db.commit()
+            db.refresh(payment)
+            # 确保关联对象已加载
+            _ = payment.resident
+            _ = payment.charge_item
+            return payment
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def delete_payment(payment_id: int, db: Session = None):
+        """删除缴费记录"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            payment = db.query(Payment).filter(Payment.id == payment_id).first()
+            if not payment:
+                raise ValueError("缴费记录不存在")
+            
+            db.delete(payment)
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            raise e
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def search_payments(keyword: str, period: str = None, db: Session = None):
+        """搜索缴费记录（按房号、姓名、收费项目）"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            query = db.query(Payment).options(
+                joinedload(Payment.resident),
+                joinedload(Payment.charge_item)
+            )
+            
+            # 如果指定了周期，先过滤周期
+            if period:
+                query = query.filter(Payment.period == period)
+            
+            # 搜索关键词
+            keyword = f"%{keyword}%"
+            query = query.join(Resident).join(ChargeItem).filter(
+                (Resident.room_no.like(keyword)) |
+                (Resident.name.like(keyword)) |
+                (ChargeItem.name.like(keyword))
+            )
+            
+            return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
+        finally:
+            if db is not None:
+                db.close()
+    
+    @staticmethod
+    def get_statistics_by_period(period: str, db: Session = None):
+        """获取周期统计信息"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            total_count = db.query(Payment).filter(Payment.period == period).count()
+            paid_count = db.query(Payment).filter(
+                and_(Payment.period == period, Payment.paid == 1)
+            ).count()
+            unpaid_count = total_count - paid_count
+            
+            total_amount = db.query(func.sum(Payment.amount)).filter(
+                Payment.period == period
+            ).scalar()
+            total_amount = float(total_amount) if total_amount else 0.0
+            
+            paid_amount = db.query(func.sum(Payment.amount)).filter(
+                and_(Payment.period == period, Payment.paid == 1)
+            ).scalar()
+            paid_amount = float(paid_amount) if paid_amount else 0.0
+            
+            unpaid_amount = total_amount - paid_amount
+            
+            return {
+                'total_count': total_count,
+                'paid_count': paid_count,
+                'unpaid_count': unpaid_count,
+                'total_amount': total_amount,
+                'paid_amount': paid_amount,
+                'unpaid_amount': unpaid_amount
+            }
+        finally:
+            if db is not None:
+                db.close()
+
+    @staticmethod
+    def get_statistics_by_year(year: int, db: Session = None):
+        """按年获取统计信息（按收费项目分组）"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            # 统计年度内的账单金额（使用 billing_start_date 年份或 period 字符串匹配）
+            payments = db.query(Payment).join(ChargeItem).filter(
+                func.strftime('%Y', Payment.billing_start_date) == f"{year:04d}"
+            ).all()
+            # 按年汇总：总账单金额、已缴金额、欠费金额；并按收费项目分别统计 total/paid/unpaid
+            total_amount = 0.0
+            total_paid = 0.0
+            by_item = {}
+            for p in payments:
+                amt = float(p.amount) if p.amount else 0.0
+                paid = float(p.paid_amount) if p.paid_amount else 0.0
+                total_amount += amt
+                total_paid += paid
+                name = p.charge_item.name if p.charge_item else '未知'
+                entry = by_item.get(name)
+                if not entry:
+                    entry = {'total': 0.0, 'paid': 0.0}
+                    by_item[name] = entry
+                entry['total'] += amt
+                entry['paid'] += paid
+
+            # 构造按项目列表，包含 total/paid/unpaid
+            by_item_list = []
+            for name, v in by_item.items():
+                unpaid = v['total'] - v['paid']
+                by_item_list.append((name, v['total'], v['paid'], unpaid))
+            by_item_list.sort(key=lambda x: x[1], reverse=True)
+
+            return {
+                'year': year,
+                'total_amount': total_amount,
+                'paid_amount': total_paid,
+                'unpaid_amount': total_amount - total_paid,
+                'by_item': by_item_list
+            }
+        finally:
+            if db is not None:
+                db.close()
+
