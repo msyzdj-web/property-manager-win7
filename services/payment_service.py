@@ -8,6 +8,7 @@ from models.payment import Payment
 from models.resident import Resident
 from models.charge_item import ChargeItem
 from models.database import SessionLocal
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class PaymentService:
@@ -183,12 +184,22 @@ class PaymentService:
                 raise ValueError("缴费月数必须大于0")
             
             # 计算本次缴费金额（按比例计算）
-            monthly_amount = float(payment.amount) / payment.billing_months
-            paid_amount_this_time = monthly_amount * paid_months
+            # 按月分摊并四舍五入到整数元（元）
+            try:
+                monthly_amount_raw = Decimal(str(payment.amount)) / Decimal(str(payment.billing_months))
+            except Exception:
+                monthly_amount_raw = Decimal(str(float(payment.amount) / payment.billing_months))
+            monthly_amount = int(monthly_amount_raw.quantize(0, rounding=ROUND_HALF_UP))
+            paid_amount_this_time = int((monthly_amount_raw * Decimal(str(paid_months))).quantize(0, rounding=ROUND_HALF_UP))
             
             # 更新缴费信息
             payment.paid_months += paid_months
-            payment.paid_amount = float(payment.paid_amount) + paid_amount_this_time
+            # 累加已交金额（保持为数值）
+            try:
+                prev_paid = Decimal(str(payment.paid_amount or 0))
+            except Exception:
+                prev_paid = Decimal(str(float(payment.paid_amount or 0.0)))
+            payment.paid_amount = float((prev_paid + Decimal(str(paid_amount_this_time))))
 
             # 记录最近一次缴费时间（即便是部分缴费也记录时间）
             payment.paid_time = datetime.now()

@@ -2,6 +2,11 @@
 物业收费管理系统主程序入口
 """
 import sys
+import time
+import socket
+import errno
+import tempfile
+import shutil
 import os
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from PyQt5.QtCore import Qt
@@ -29,6 +34,74 @@ from ui.main_window import MainWindow
 def main():
     """主函数"""
     try:
+        # ----------------- PyInstaller temp cleanup + single-instance -----------------
+        # Clean up old PyInstaller _MEI* temp dirs to reduce "file already exists" popup risk.
+        def cleanup_old_pyinstaller_dirs(days_old=1):
+            """
+            Remove leftover PyInstaller temp unpack directories starting with '_MEI'
+            that are older than `days_old`. Skip the currently used MEIPASS dir.
+            """
+            try:
+                tmp = tempfile.gettempdir()
+                now = time.time()
+                cutoff = now - days_old * 86400
+                current_meipass = None
+                try:
+                    if getattr(sys, 'frozen', False):
+                        current_meipass = getattr(sys, '_MEIPASS', None)
+                except Exception:
+                    current_meipass = None
+                for name in os.listdir(tmp):
+                    if not name.startswith('_MEI'):
+                        continue
+                    path = os.path.join(tmp, name)
+                    try:
+                        # skip if it's current process unpack dir
+                        if current_meipass and os.path.normcase(os.path.normpath(path)) == os.path.normcase(os.path.normpath(current_meipass)):
+                            continue
+                        if not os.path.isdir(path):
+                            continue
+                        mtime = os.path.getmtime(path)
+                        if mtime < cutoff:
+                            shutil.rmtree(path, ignore_errors=True)
+                    except Exception:
+                        # ignore errors; don't block startup
+                        pass
+            except Exception:
+                pass
+
+        # Ensure single instance by binding a local TCP port.
+        _SINGLE_INSTANCE_PORT = 54213
+
+        def ensure_single_instance_or_exit(port=_SINGLE_INSTANCE_PORT):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            except Exception:
+                pass
+            try:
+                s.bind(('127.0.0.1', port))
+                s.listen(1)
+            except OSError as e:
+                if getattr(e, 'errno', None) in (errno.EADDRINUSE,):
+                    # Existing instance — exit quietly
+                    sys.exit(0)
+                raise
+            return s
+
+        # Run cleanup (remove >1 day old) then ensure single instance
+        try:
+            cleanup_old_pyinstaller_dirs(days_old=1)
+        except Exception:
+            pass
+        _single_socket = None
+        try:
+            _single_socket = ensure_single_instance_or_exit(_SINGLE_INSTANCE_PORT)
+        except SystemExit:
+            raise
+        except Exception:
+            _single_socket = None
+        # --------------------------------------------------------------------------
         # 迁移数据库（如果存在旧数据库）
         migrate_database()
         

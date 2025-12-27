@@ -124,7 +124,15 @@ class ExportDialog(QDialog):
             default_filename = f'缴费记录_{datetime.now().strftime("%Y%m%d")}.xlsx'
             file_filter = 'Excel文件 (*.xlsx)'
         else:
-            default_filename = f'月度统计报表_{period}.xlsx'
+            # 根据粒度选择默认文件名（按日时使用导出日期精确到日）
+            gran = '按月'
+            if hasattr(self, 'gran_combo'):
+                gran = self.gran_combo.currentText()
+            if gran == '按日':
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                default_filename = f'日度统计报表_{today_str}.xlsx'
+            else:
+                default_filename = f'月度统计报表_{period}.xlsx'
             file_filter = 'Excel文件 (*.xlsx)'
         
         default_path = os.path.join(default_dir, default_filename)

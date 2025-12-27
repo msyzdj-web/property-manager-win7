@@ -10,6 +10,7 @@ from PyQt5.QtCore import Qt, QRect
 from datetime import datetime
 
 from services.payment_service import PaymentService
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class ReceiptPrinter:
@@ -319,12 +320,39 @@ class ReceiptPrinter:
 
             # 表格区域设置
             table_top = y
+            # 计算明细行：仅显示实际存在的非空项目，避免打印空行
+            details = []
+            try:
+                item_name = payment.charge_item.name if payment.charge_item else ""
+                billing_period = ""
+                if payment.billing_start_date and payment.billing_end_date:
+                    if is_small_paper:
+                        billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{payment.billing_end_date.strftime('%y.%m.%d')}"
+                    else:
+                        billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
+                # 将金额四舍五入为整数元用于显示
+                try:
+                    amount_text = str(int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP))) if getattr(payment, 'amount', None) is not None else ""
+                except Exception:
+                    try:
+                        amount_text = str(int(round(float(payment.amount)))) if getattr(payment, 'amount', None) is not None else ""
+                    except Exception:
+                        amount_text = str(payment.amount) if getattr(payment, 'amount', None) is not None else ""
+                if (item_name and item_name.strip()) or (billing_period and billing_period.strip()) or (amount_text and amount_text.strip()):
+                    details.append((item_name, billing_period, amount_text))
+            except Exception:
+                # 如果读取字段失败，保持 details 为空以避免占位行
+                details = []
+
+            # 限制最大显示行数以适配纸张类型（避免过长）
             if is_narrow_paper:
-                num_rows = 4
+                max_rows = 4
             elif is_wide_paper:
-                num_rows = 3  # 针式打印纸(241x93)高度非常有限，只保留3行明细
+                max_rows = 3
             else:
-                num_rows = 8
+                max_rows = 8
+
+            num_rows = min(max_rows, len(details)) if details else 0
             note_rows = 1
             total_table_rows = 1 + num_rows + 1 + note_rows
             table_height = total_table_rows * row_height
@@ -362,31 +390,20 @@ class ReceiptPrinter:
                 x += w
             y += row_height
 
-            # 明细行
+            # 明细行：按实际存在的 details 绘制，避免空行
             painter.setFont(normal_font)
-            for r in range(num_rows):
-                # 填充第一行数据
-                if r == 0:
-                    item_name = payment.charge_item.name if payment.charge_item else ""
-                    billing_period = ""
-                    if payment.billing_start_date and payment.billing_end_date:
-                        if is_small_paper:
-                             billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{payment.billing_end_date.strftime('%y.%m.%d')}"
-                        else:
-                             billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
-                    amount_text = f"{float(payment.amount):.2f}"
-                    
-                    x = start_x
-                    painter.drawText(QRect(x + 2, y, col_widths[0] - 4, row_height), Qt.AlignLeft | Qt.AlignVCenter, item_name)
-                    x += col_widths[0]
-                    # 时间居中缩小字体? 已经在上面调整了列宽，这里正常居中
-                    # 如果小票纸，字体可能还需要再小一点点防止换行
-                    if is_small_paper: painter.setFont(small_font)
-                    painter.drawText(QRect(x + 1, y, col_widths[1] - 2, row_height), Qt.AlignCenter, billing_period)
-                    if is_small_paper: painter.setFont(normal_font)
-                    x += col_widths[1]
-                    painter.drawText(QRect(x + 1, y, col_widths[2] - 2, row_height), Qt.AlignCenter, amount_text)
-                    # 备注留空
+            for idx in range(num_rows):
+                item_name, billing_period, amount_text = details[idx]
+                x = start_x
+                painter.drawText(QRect(x + 2, y, col_widths[0] - 4, row_height), Qt.AlignLeft | Qt.AlignVCenter, item_name)
+                x += col_widths[0]
+                if is_small_paper:
+                    painter.setFont(small_font)
+                painter.drawText(QRect(x + 1, y, col_widths[1] - 2, row_height), Qt.AlignCenter, billing_period)
+                if is_small_paper:
+                    painter.setFont(normal_font)
+                x += col_widths[1]
+                painter.drawText(QRect(x + 1, y, col_widths[2] - 2, row_height), Qt.AlignCenter, amount_text)
                 y += row_height
 
             # 如果有实付信息
@@ -405,15 +422,18 @@ class ReceiptPrinter:
                         paid_period_text = f"{start.strftime('%y.%m.%d')}-{end_paid.strftime('%y.%m.%d')}"
                     else:
                         paid_period_text = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
-                    paid_amount_text = f"{float(payment.paid_amount):.2f}" if payment.paid_amount else "0.00"
+                    try:
+                        paid_amount_text = str(int(Decimal(str(payment.paid_amount)).quantize(0, rounding=ROUND_HALF_UP))) if payment.paid_amount else "0"
+                    except Exception:
+                        try:
+                            paid_amount_text = str(int(round(float(payment.paid_amount)))) if payment.paid_amount else "0"
+                        except Exception:
+                            paid_amount_text = str(payment.paid_amount or "0")
                     
                     # 第一行：实收周期
                     note_y = y
                     painter.fillRect(start_x + 1, note_y + 1, table_width - 2, row_height - 2, QColor('white'))
-                    # 重新画外框(已被覆盖)，其实不需要，因为网格已经画了，我们只要把中间竖线盖住即可
-                    # 简单起见，覆盖后重画文字即可
                     painter.drawText(QRect(start_x + 5, note_y, table_width - 10, row_height), Qt.AlignLeft | Qt.AlignVCenter, f"实收周期: {paid_period_text}")
-                    
                     y += row_height
                     # 第二行：实收金额
                     note_y = y
@@ -446,7 +466,15 @@ class ReceiptPrinter:
             painter.setFont(bold_font)
             painter.drawText(QRect(start_x + c1 + c2, total_y, c3, row_height), Qt.AlignLeft | Qt.AlignVCenter, "合计小写")
             painter.setFont(normal_font)
-            painter.drawText(QRect(start_x + c1 + c2 + c3, total_y, c4, row_height), Qt.AlignCenter | Qt.AlignVCenter, f"{display_amount:.2f}元")
+            # 合计显示为整数元
+            try:
+                display_amount_str = str(int(Decimal(str(display_amount)).quantize(0, rounding=ROUND_HALF_UP)))
+            except Exception:
+                try:
+                    display_amount_str = str(int(round(float(display_amount))))
+                except Exception:
+                    display_amount_str = str(display_amount)
+            painter.drawText(QRect(start_x + c1 + c2 + c3, total_y, c4, row_height), Qt.AlignCenter | Qt.AlignVCenter, f"{display_amount_str}元")
             y += row_height
 
             # 提示行
@@ -748,7 +776,14 @@ class ReceiptPrinter:
                 except Exception:
                     display_line_amount = float(p.amount or 0.0)
 
-                amount_text = f"{display_line_amount:.2f}"
+                # 显示为整数元
+                try:
+                    amount_text = str(int(Decimal(str(display_line_amount)).quantize(0, rounding=ROUND_HALF_UP)))
+                except Exception:
+                    try:
+                        amount_text = str(int(round(float(display_line_amount))))
+                    except Exception:
+                        amount_text = str(display_line_amount)
                 painter.drawText(QRect(int(start_x + 6), int(y + 4), int(col_widths[0] - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignVCenter, item_name)
                 painter.drawText(QRect(int(start_x + col_widths[0] + 6), int(y + 4), int(col_widths[1] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, billing_period_line)
                 painter.drawText(QRect(int(start_x + col_widths[0] + col_widths[1] + 6), int(y + 4), int(col_widths[2] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, amount_text)

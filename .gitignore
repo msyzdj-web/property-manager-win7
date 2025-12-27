@@ -45,3 +45,8 @@ Thumbs.db
 # 日志
 *.log
 
+# 可执行文件和构建产物
+*.exe
+*.exe.*
+release/
+
