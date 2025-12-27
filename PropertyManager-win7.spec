@@ -11,7 +11,7 @@ import os
 # This expands at runtime to %LOCALAPPDATA%\PropertyManager\MEI
 app_runtime_tmpdir = os.path.expandvars(r"%LOCALAPPDATA%\\PropertyManager\\MEI")
 
-datas = [('logo.jpg', '.')]
+datas = [('logo.jpg', '.'), ('property.db', '.'), ('logo.ico', '.')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('openpyxl')

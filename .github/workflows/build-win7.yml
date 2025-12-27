@@ -36,6 +36,9 @@ jobs:
         run: |
           # ensure explicit dist output folder to produce a proper onedir layout
           pyinstaller --clean --noconfirm --onedir --windowed --distpath "dist/PropertyManager" main.py
+          # copy runtime data files (DB, icons, logos) into the onedir so users who download the zip get a runnable package
+          if (Test-Path 'property.db') { Copy-Item -Path 'property.db' -Destination 'dist/PropertyManager' -Force }
+          Get-ChildItem -Path . -Include 'logo.*','*.ico','*.jpg' -File -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item -Path $_.FullName -Destination 'dist/PropertyManager' -Force }
 
       - name: List build output
         run: |
