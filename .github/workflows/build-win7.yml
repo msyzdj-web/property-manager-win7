@@ -35,7 +35,7 @@ jobs:
       - name: Build with PyInstaller (onedir) from main.py
         run: |
           # ensure explicit dist output folder to produce a proper onedir layout
-          pyinstaller --clean --noconfirm --onedir --windowed --distpath "dist/PropertyManager" main.py
+          pyinstaller --clean --noconfirm --log-level=DEBUG --onedir --windowed --distpath "dist/PropertyManager" main.py
           # copy runtime data files (DB, icons, logos) into the onedir so users who download the zip get a runnable package
           if (Test-Path 'property.db') { Copy-Item -Path 'property.db' -Destination 'dist/PropertyManager' -Force }
           Get-ChildItem -Path . -Include 'logo.*','*.ico','*.jpg' -File -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item -Path $_.FullName -Destination 'dist/PropertyManager' -Force }
@@ -68,7 +68,7 @@ jobs:
         run: |
           if (Test-Path "PropertyManager-win7.spec") {
             Write-Output "Building one-file EXE using spec (will use runtime_tmpdir from spec)"
-            pyinstaller --clean --noconfirm PropertyManager-win7.spec --distpath "dist/PropertyManager-EXE"
+            pyinstaller --clean --noconfirm --log-level=DEBUG PropertyManager-win7.spec --distpath "dist/PropertyManager-EXE"
             $zipExe = "dist/PropertyManager-Win7-EXE.zip"
             if (Test-Path $zipExe) { Remove-Item $zipExe -Force }
             Compress-Archive -Path "dist/PropertyManager-EXE" -DestinationPath $zipExe -Force
@@ -76,6 +76,7 @@ jobs:
           } else {
             Write-Output "spec not found, skipping one-file build"
           }
+        continue-on-error: true
 
       - name: Upload one-file artifact (if created)
         if: always()
