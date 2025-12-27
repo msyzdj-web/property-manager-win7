@@ -6,13 +6,10 @@ from PyInstaller.utils.hooks import collect_all
 import os
 
 # application-specific runtime tmpdir to avoid using system %TEMP%
-# use %LOCALAPPDATA%\PropertyManager\MEI
-app_runtime_tmpdir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser("~")), "PropertyManager", "MEI")
-if not os.path.exists(app_runtime_tmpdir):
-    try:
-        os.makedirs(app_runtime_tmpdir, exist_ok=True)
-    except Exception:
-        app_runtime_tmpdir = None
+# Use an environment-variable expression so the runtime tmpdir is resolved
+# on the end-user machine (not baked as an absolute path at build time).
+# This expands at runtime to %LOCALAPPDATA%\PropertyManager\MEI
+app_runtime_tmpdir = os.path.expandvars(r"%LOCALAPPDATA%\\PropertyManager\\MEI")
 
 datas = [('logo.jpg', '.')]
 binaries = []
