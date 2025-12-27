@@ -2,22 +2,15 @@ name: Build and Release (Windows)
 
 on:
   push:
-<<<<<<< HEAD
     branches: [ main, master ]
-=======
-    branches: [ main ]
->>>>>>> d4fa4ca57bfb62cf8c52ef13d615dd745fa57580
   workflow_dispatch:
 
 jobs:
   build_release:
     runs-on: windows-latest
-<<<<<<< HEAD
     permissions:
       contents: write
       packages: write
-=======
->>>>>>> d4fa4ca57bfb62cf8c52ef13d615dd745fa57580
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,11 +40,7 @@ jobs:
         with:
           name: propertymanager-release
           path: |
-<<<<<<< HEAD
             PropertyManager-release-*.zip
-=======
-            *.zip
->>>>>>> d4fa4ca57bfb62cf8c52ef13d615dd745fa57580
 
       - name: Create GitHub release and attach artifact
         uses: ncipollo/release-action@v1
@@ -61,11 +50,6 @@ jobs:
           name: 'Release ${{ github.sha }}'
           draft: false
           prerelease: false
-<<<<<<< HEAD
           generateReleaseNotes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-=======
->>>>>>> d4fa4ca57bfb62cf8c52ef13d615dd745fa57580
-
-
