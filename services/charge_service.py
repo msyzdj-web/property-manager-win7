@@ -4,6 +4,7 @@
 from sqlalchemy.orm import Session
 from models.charge_item import ChargeItem
 from models.database import SessionLocal
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class ChargeService:
@@ -138,16 +139,22 @@ class ChargeService:
         """
         unit = (charge_item.unit or '').lower()
         price = float(charge_item.price)
+        # 辅助：将浮点值四舍五入到整数元并返回 int
+        def _round_to_int(val):
+            return int(Decimal(str(val)).quantize(0, rounding=ROUND_HALF_UP))
+
         if charge_item.charge_type == 'fixed':
             # 根据单位决定计费方式：元/日、元/月、元/年
             if '日' in unit:
                 # 按天计费，需要起止日期
                 if billing_start_date and billing_end_date:
                     days = (billing_end_date - billing_start_date).days + 1
-                    return price * days
+                    val = price * days
+                    return _round_to_int(val)
                 else:
                     # 没有日期则按 1 天计
-                    return price * 1
+                    val = price * 1
+                    return _round_to_int(val)
             elif '年' in unit:
                 # 按年计费：按年价格 * 年数（或按月换算）
                 if billing_start_date and billing_end_date:
@@ -155,33 +162,41 @@ class ChargeService:
                     # 简化按整年计算
                     if years <= 0:
                         years = 1
-                    return price * years
+                    val = price * years
+                    return _round_to_int(val)
                 else:
-                    return price * max(1, months // 12)
+                    val = price * max(1, months // 12)
+                    return _round_to_int(val)
             else:
                 # 默认按月
-                return price * months
+                val = price * months
+                return _round_to_int(val)
         elif charge_item.charge_type == 'area':
             # 按面积计费，单位同样支持日/月/年
             if '日' in unit:
                 if billing_start_date and billing_end_date:
                     days = (billing_end_date - billing_start_date).days + 1
-                    return price * resident_area * days
+                    val = price * resident_area * days
+                    return _round_to_int(val)
                 else:
-                    return price * resident_area * 1
+                    val = price * resident_area * 1
+                    return _round_to_int(val)
             elif '年' in unit:
                 if billing_start_date and billing_end_date:
                     years = (billing_end_date.year - billing_start_date.year)
                     if years <= 0:
                         years = 1
-                    return price * resident_area * years
+                    val = price * resident_area * years
+                    return _round_to_int(val)
                 else:
-                    return price * resident_area * max(1, months // 12)
+                    val = price * resident_area * max(1, months // 12)
+                    return _round_to_int(val)
             else:
-                return price * resident_area * months
+                val = price * resident_area * months
+                return _round_to_int(val)
         elif charge_item.charge_type == 'manual':
-            # 手动：直接使用输入金额
-            return manual_amount
+            # 手动：直接使用输入金额（四舍五入到整数元）
+            return _round_to_int(manual_amount)
         else:
             return 0.0
 

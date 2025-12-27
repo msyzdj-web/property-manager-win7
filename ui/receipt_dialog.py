@@ -9,6 +9,7 @@ import os
 
 from services.payment_service import PaymentService
 from utils.printer import ReceiptPrinter
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class ReceiptDialog(QDialog):
@@ -69,6 +70,18 @@ class ReceiptDialog(QDialog):
         btn_layout.addWidget(self.close_btn)
         layout.addLayout(btn_layout)
     
+    def _fmt_amount_int(self, value):
+        try:
+            if value is None:
+                return "0"
+            v = Decimal(str(value))
+            return str(int(v.quantize(0, rounding=ROUND_HALF_UP)))
+        except Exception:
+            try:
+                return str(int(round(float(value))))
+            except Exception:
+                return str(value)
+    
     def load_receipt(self):
         """加载收据内容"""
         try:
@@ -95,7 +108,12 @@ class ReceiptDialog(QDialog):
             paid_amount = float(payment.paid_amount) if getattr(payment, 'paid_amount', None) else 0.0
             # 显示实际金额：优先显示已缴金额（如果有），否则显示账单总额
             display_amount = paid_amount if paid_amount > 0 else total_amount
-            upper_amount = ReceiptPrinter()._num_to_rmb_upper(display_amount)
+            # 合计大写使用整数元金额
+            try:
+                display_amount_int = int(Decimal(str(display_amount)).quantize(0, rounding=ROUND_HALF_UP))
+            except Exception:
+                display_amount_int = int(round(float(display_amount)))
+            upper_amount = ReceiptPrinter()._num_to_rmb_upper(display_amount_int)
         except Exception:
             total_amount = float(payment.amount) if payment.amount else 0.0
             display_amount = total_amount
@@ -134,7 +152,7 @@ class ReceiptDialog(QDialog):
                 start_tx = add_months(payment.billing_start_date, prev_paid)
                 end_tx = add_months(start_tx, months_in_tx)
                 paid_period = f"{start_tx.strftime('%Y.%m.%d')}–{end_tx.strftime('%Y.%m.%d')}"
-                paid_amount_display = f"{float(last_tx.amount):.2f}"
+                paid_amount_display = self._fmt_amount_int(last_tx.amount)
             else:
                 # 无流水则退回到累计已缴金额显示
                 if getattr(payment, 'paid_months', 0) and payment.paid_months > 0 and payment.billing_start_date:
@@ -148,7 +166,7 @@ class ReceiptDialog(QDialog):
                     start = payment.billing_start_date
                     end_paid = add_months(start, int(payment.paid_months))
                     paid_period = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
-                    paid_amount_display = f"{float(payment.paid_amount):.2f}" if payment.paid_amount else ""
+                    paid_amount_display = self._fmt_amount_int(payment.paid_amount) if payment.paid_amount else ""
         except Exception:
             paid_period = ""
             paid_amount_display = ""
@@ -268,7 +286,7 @@ th {{ background:#f5f5f5; font-weight:600; }}
     <tr>
       <td>{payment.charge_item.name if payment.charge_item else ""}</td>
       <td class="center">{billing_period}</td>
-      <td class="center">{total_amount:.2f}</td>
+      <td class="center">{self._fmt_amount_int(total_amount)}</td>
       <td></td>
     </tr>
 """ 
@@ -292,7 +310,7 @@ th {{ background:#f5f5f5; font-weight:600; }}
       <td style="font-weight:700; border:1px solid #000; padding-left:8px;">合计金额大写</td>
       <td style="border:1px solid #000;">{upper_amount}</td>
             <td style="font-weight:700; border:1px solid #000; text-align:center;">合计金额小写</td>
-      <td style="border:1px solid #000; text-align:center;">{display_amount:.2f}元</td>
+      <td style="border:1px solid #000; text-align:center;">{self._fmt_amount_int(display_amount)}元</td>
     </tr>
     <tr>
       <td colspan="4" style="border:1px solid #000; padding:6px 8px; text-align:left;">请确认您的缴费金额，如有疑问请咨询物业服务中心</td>
@@ -432,7 +450,15 @@ th {{ background:#f5f5f5; font-weight:600; }}
             detail_row = start_row + 1
             ws.cell(row=detail_row, column=1, value=payment.charge_item.name if payment.charge_item else "")
             ws.cell(row=detail_row, column=2, value=billing_period)
-            ws.cell(row=detail_row, column=3, value=float(payment.amount))
+            # 写为整数元
+            try:
+                amt_int = int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP))
+            except Exception:
+                try:
+                    amt_int = int(round(float(payment.amount)))
+                except Exception:
+                    amt_int = float(payment.amount)
+            ws.cell(row=detail_row, column=3, value=amt_int)
             ws.cell(row=detail_row, column=4, value="")
             for col in range(1, 5):
                 c = ws.cell(row=detail_row, column=col)
@@ -450,7 +476,14 @@ th {{ background:#f5f5f5; font-weight:600; }}
             ws.cell(row=total_row, column=1, value="合计金额大写").font = bold
             ws.cell(row=total_row, column=2, value=self._get_upper_amount_cell(payment)).alignment = center
             ws.cell(row=total_row, column=3, value="合计金额小写").font = bold
-            ws.cell(row=total_row, column=4, value=f"{float(payment.amount):.2f}元")
+            try:
+                total_int = int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP))
+            except Exception:
+                try:
+                    total_int = int(round(float(payment.amount)))
+                except Exception:
+                    total_int = payment.amount
+            ws.cell(row=total_row, column=4, value=f"{total_int}元")
             for col in range(1, 5):
                 c = ws.cell(row=total_row, column=col)
                 c.border = border

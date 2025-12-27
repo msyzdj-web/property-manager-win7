@@ -7,6 +7,7 @@ from openpyxl.chart import BarChart, PieChart, Reference
 from datetime import datetime
 from services.payment_service import PaymentService
 from services.charge_service import ChargeService
+from decimal import Decimal, ROUND_HALF_UP
 
 
 class ReportGenerator:
@@ -52,9 +53,9 @@ class ReportGenerator:
                 ['总账单数', stats['total_count']],
                 ['已缴费数', stats['paid_count']],
                 ['未缴费数', stats['unpaid_count']],
-                ['总金额', f"¥{stats['total_amount']:.2f}"],
-                ['已缴费金额', f"¥{stats['paid_amount']:.2f}"],
-                ['欠费金额', f"¥{stats['unpaid_amount']:.2f}"],
+                ['总金额', f"¥{int(Decimal(str(stats['total_amount'])).quantize(0, rounding=ROUND_HALF_UP))}"],
+                ['已缴费金额', f"¥{int(Decimal(str(stats['paid_amount'])).quantize(0, rounding=ROUND_HALF_UP))}"],
+                ['欠费金额', f"¥{int(Decimal(str(stats['unpaid_amount'])).quantize(0, rounding=ROUND_HALF_UP))}"],
                 ['缴费率', f"{(stats['paid_count']/stats['total_count']*100) if stats['total_count'] > 0 else 0:.1f}%"]
             ]
             
@@ -105,9 +106,9 @@ class ReportGenerator:
                     item_name,
                     item_stats['count'],
                     item_stats['paid_count'],
-                    f"¥{item_stats['total']:.2f}",
-                    f"¥{item_stats['paid']:.2f}",
-                    f"¥{unpaid:.2f}"
+                    f"¥{int(Decimal(str(item_stats['total'])).quantize(0, rounding=ROUND_HALF_UP))}",
+                    f"¥{int(Decimal(str(item_stats['paid'])).quantize(0, rounding=ROUND_HALF_UP))}",
+                    f"¥{int(Decimal(str(unpaid)).quantize(0, rounding=ROUND_HALF_UP))}"
                 ]
                 for col_idx, value in enumerate(row, start=1):
                     sheet.cell(row=detail_row, column=col_idx).value = value
@@ -177,8 +178,10 @@ class ReportGenerator:
 
             # 标题
             title_font = Font(bold=True, size=16)
+            # 使用导出日期作为日度报表标题（精确到日）
+            export_date = datetime.now().strftime('%Y-%m-%d')
             sheet.merge_cells('A1:E1')
-            sheet['A1'] = f"{period} 日度收费统计报表"
+            sheet['A1'] = f"{export_date} 日度收费统计报表"
             sheet['A1'].font = title_font
             sheet['A1'].alignment = Alignment(horizontal='center')
 
@@ -191,9 +194,9 @@ class ReportGenerator:
                 ('总账单数', total_count),
                 ('已缴费数', paid_count),
                 ('未缴费数', unpaid_count),
-                ('总金额', f"¥{total_amount:.2f}"),
-                ('已缴费金额', f"¥{paid_amount:.2f}"),
-                ('欠费金额', f"¥{unpaid_amount:.2f}"),
+                ('总金额', f"¥{int(Decimal(str(total_amount)).quantize(0, rounding=ROUND_HALF_UP))}"),
+                ('已缴费金额', f"¥{int(Decimal(str(paid_amount)).quantize(0, rounding=ROUND_HALF_UP))}"),
+                ('欠费金额', f"¥{int(Decimal(str(unpaid_amount)).quantize(0, rounding=ROUND_HALF_UP))}"),
                 ('缴费率', f"{(paid_count/total_count*100) if total_count>0 else 0:.1f}%")
             ]
             for i, (label, value) in enumerate(summary_data, start=summary_row + 1):
@@ -206,14 +209,27 @@ class ReportGenerator:
             for day in sorted(day_stats.keys()):
                 d = day_stats[day]
                 unpaid_day = d['total'] - d['paid']
-                sheet.append([f"{period}-{day:02d}", d['count'], f"¥{d['total']:.2f}", f"¥{d['paid']:.2f}", f"¥{unpaid_day:.2f}"])
+                sheet.append([
+                    f"{period}-{day:02d}",
+                    d['count'],
+                    f"¥{int(Decimal(str(d['total'])).quantize(0, rounding=ROUND_HALF_UP))}",
+                    f"¥{int(Decimal(str(d['paid'])).quantize(0, rounding=ROUND_HALF_UP))}",
+                    f"¥{int(Decimal(str(unpaid_day)).quantize(0, rounding=ROUND_HALF_UP))}"
+                ])
 
             sheet.append([])
             # 收费项目明细（账单数/已缴费数/总金额/已缴金额/欠费金额）
             sheet.append(['收费项目', '账单数', '已缴费数', '总金额', '已缴金额', '欠费金额'])
             for name, stats_item in charge_item_stats.items():
                 unpaid_item = stats_item['total'] - stats_item['paid']
-                sheet.append([name, stats_item['count'], stats_item['paid_count'], f"¥{stats_item['total']:.2f}", f"¥{stats_item['paid']:.2f}", f"¥{unpaid_item:.2f}"])
+                sheet.append([
+                    name,
+                    stats_item['count'],
+                    stats_item['paid_count'],
+                    f"¥{int(Decimal(str(stats_item['total'])).quantize(0, rounding=ROUND_HALF_UP))}",
+                    f"¥{int(Decimal(str(stats_item['paid'])).quantize(0, rounding=ROUND_HALF_UP))}",
+                    f"¥{int(Decimal(str(unpaid_item)).quantize(0, rounding=ROUND_HALF_UP))}"
+                ])
 
             # 列宽
             sheet.column_dimensions['A'].width = 18

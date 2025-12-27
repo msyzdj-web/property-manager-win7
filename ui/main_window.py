@@ -10,6 +10,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap
 import os
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 
 from services.resident_service import ResidentService
 from services.charge_service import ChargeService
@@ -22,6 +23,24 @@ from ui.pay_dialog import PayDialog
 from ui.import_dialog import ImportDialog
 from ui.export_dialog import ExportDialog
 from ui.backup_dialog import BackupDialog
+
+# Small helper QTableWidgetItem subclass to support custom sort keys
+class SortableItem(QTableWidgetItem):
+    def __init__(self, text, sort_key=None):
+        super().__init__(str(text))
+        self.sort_key = sort_key if sort_key is not None else text
+
+    def __lt__(self, other):
+        try:
+            a = self.sort_key
+            b = other.sort_key
+            # try direct compare first (numbers, tuples)
+            return a < b
+        except Exception:
+            try:
+                return str(self.text()) < str(other.text())
+            except Exception:
+                return False
 
 
 class MainWindow(QMainWindow):
@@ -225,11 +244,26 @@ class MainWindow(QMainWindow):
         self.resident_table.setColumnCount(8)
         self.resident_table.setHorizontalHeaderLabels(['ID', '房号', '姓名', '电话', '面积', '入住日期', '身份', '状态'])
         self.resident_table.horizontalHeader().setStretchLastSection(True)
+        # 启用表头点击排序
+        self.resident_table.setSortingEnabled(True)
         self.resident_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.resident_table.setEditTriggers(QTableWidget.NoEditTriggers)
         layout.addWidget(self.resident_table)
         
         self.tab_widget.addTab(tab, '住户管理')
+
+    # 金额显示：四舍五入到整数元并返回字符串
+    def _fmt_amount_int(self, value):
+        try:
+            if value is None:
+                return "0"
+            v = Decimal(str(value))
+            return str(int(v.quantize(0, rounding=ROUND_HALF_UP)))
+        except Exception:
+            try:
+                return str(int(round(float(value))))
+            except Exception:
+                return str(value)
     
     def create_charge_tab(self):
         """创建收费项目管理标签页"""
@@ -393,8 +427,23 @@ class MainWindow(QMainWindow):
             self.resident_table.setRowCount(len(residents))
             
             for row, resident in enumerate(residents):
-                self.resident_table.setItem(row, 0, QTableWidgetItem(str(resident.id)))
-                self.resident_table.setItem(row, 1, QTableWidgetItem(resident.room_no))
+                # ID 列使用可排序的整数 key
+                try:
+                    id_key = int(resident.id)
+                except Exception:
+                    id_key = resident.id
+                self.resident_table.setItem(row, 0, SortableItem(str(resident.id), sort_key=id_key))
+                # 房号解析为整数元组作为排序 key，例如 "1-1-1001" -> (1,1,1001)
+                def _room_key(s):
+                    parts = str(s).split('-')
+                    key = []
+                    for p in parts:
+                        try:
+                            key.append(int(p))
+                        except Exception:
+                            key.append(p)
+                    return tuple(key)
+                self.resident_table.setItem(row, 1, SortableItem(resident.room_no, sort_key=_room_key(resident.room_no)))
                 self.resident_table.setItem(row, 2, QTableWidgetItem(resident.name))
                 self.resident_table.setItem(row, 3, QTableWidgetItem(resident.phone or ''))
                 self.resident_table.setItem(row, 4, QTableWidgetItem(str(float(resident.area) if resident.area else 0.0)))
@@ -419,8 +468,21 @@ class MainWindow(QMainWindow):
             self.resident_table.setRowCount(len(residents))
             
             for row, resident in enumerate(residents):
-                self.resident_table.setItem(row, 0, QTableWidgetItem(str(resident.id)))
-                self.resident_table.setItem(row, 1, QTableWidgetItem(resident.room_no))
+                try:
+                    id_key = int(resident.id)
+                except Exception:
+                    id_key = resident.id
+                self.resident_table.setItem(row, 0, SortableItem(str(resident.id), sort_key=id_key))
+                def _room_key(s):
+                    parts = str(s).split('-')
+                    key = []
+                    for p in parts:
+                        try:
+                            key.append(int(p))
+                        except Exception:
+                            key.append(p)
+                    return tuple(key)
+                self.resident_table.setItem(row, 1, SortableItem(resident.room_no, sort_key=_room_key(resident.room_no)))
                 self.resident_table.setItem(row, 2, QTableWidgetItem(resident.name))
                 self.resident_table.setItem(row, 3, QTableWidgetItem(resident.phone or ''))
                 self.resident_table.setItem(row, 4, QTableWidgetItem(str(float(resident.area) if resident.area else 0.0)))
@@ -576,9 +638,9 @@ class MainWindow(QMainWindow):
                 self.payment_table.setItem(row, 4, QTableWidgetItem(billing_period))
                 self.payment_table.setItem(row, 5, QTableWidgetItem(f"{payment.billing_months} 月"))
                 self.payment_table.setItem(row, 6, QTableWidgetItem(f"{payment.paid_months} 月"))
-                self.payment_table.setItem(row, 7, QTableWidgetItem(str(float(payment.amount))))
+                self.payment_table.setItem(row, 7, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
                 # 已缴金额列
-                self.payment_table.setItem(row, 8, QTableWidgetItem(str(float(payment.paid_amount) if payment.paid_amount else 0.0)))
+                self.payment_table.setItem(row, 8, QTableWidgetItem(self._fmt_amount_int(payment.paid_amount)))
                 # 缴费状态
                 if payment.paid == 1:
                     status_text = '已缴费'
@@ -668,7 +730,7 @@ class MainWindow(QMainWindow):
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
                 self.payment_table.setItem(row, 4, QTableWidgetItem(payment.period))
-                self.payment_table.setItem(row, 5, QTableWidgetItem(str(float(payment.amount))))
+                self.payment_table.setItem(row, 5, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
                 self.payment_table.setItem(row, 6, QTableWidgetItem('已缴费' if payment.paid == 1 else '未缴费'))
                 self.payment_table.setItem(row, 7, QTableWidgetItem(
                     payment.paid_time.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_time else ''))
@@ -861,7 +923,7 @@ class MainWindow(QMainWindow):
                 if remaining < 0:
                     remaining = 0.0
                 unpaid_total_remaining += remaining
-                self.unpaid_table.setItem(row, 5, QTableWidgetItem(f"{remaining:.2f}"))
+                self.unpaid_table.setItem(row, 5, QTableWidgetItem(self._fmt_amount_int(remaining)))
                 self.unpaid_table.setItem(row, 6, QTableWidgetItem(
                     payment.created_at.strftime('%Y-%m-%d %H:%M:%S') if payment.created_at else ''))
             
@@ -870,7 +932,7 @@ class MainWindow(QMainWindow):
             stats_text = f"总计: {stats['total_count']} 条 | "
             stats_text += f"已缴费: {stats['paid_count']} 条 | "
             stats_text += f"未缴费: {stats['unpaid_count']} 条 | "
-            stats_text += f"欠费总额: ¥{unpaid_total_remaining:.2f}"
+            stats_text += f"欠费总额: ¥{self._fmt_amount_int(unpaid_total_remaining)}"
             self.unpaid_stats_label.setText(stats_text)
         except Exception as e:
             QMessageBox.critical(self, '错误', f'加载欠费列表失败：{str(e)}')
