@@ -90,7 +90,7 @@ https://github.com/你的用户名/property-manager-win7.git
 ### 步骤 1：进入 Actions 页面
 
 1. **在 GitHub 上打开你的仓库**
-   - 访问：https://github.com/你的用户名/property-manager-win7
+   - 访问：https://github.com//msyzdj-web/property-manager-win7
 
 2. **点击 "Actions" 标签页**
    - 在仓库顶部看到 Actions 标签
