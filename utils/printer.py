@@ -223,17 +223,23 @@ class ReceiptPrinter:
             small_font = get_font(0.9)           # 小字
             bold_font = get_font(1.0, True)      # 正文粗体
 
+            # 使用 QFontMetrics 进行更精确的高度控制
+            fm_normal = QFontMetrics(normal_font)
+            fm_company = QFontMetrics(company_font)
+            fm_title = QFontMetrics(title_font)
+
             # 页面尺寸与边距
             margin = int(width * margin_scale)
             content_width = width - 2 * margin
             y = margin
             
-            # 行高计算
+            # 行高计算（保留原策略，同时确保不小于字体高度）
             if is_wide_paper:
                 # 241x93高度极小，使用极紧凑行高
                 row_height = int(base_pixel_size * 1.5)
             else:
                 row_height = int(base_pixel_size * 2.2)  # 行高为字号的 2.2 倍
+            row_height = max(row_height, fm_normal.height() + 6)
             
             # 顶部公司名称（居中、加下划线效果用线）
             # 尝试绘制LOGO
@@ -251,8 +257,10 @@ class ReceiptPrinter:
                 pass
 
             painter.setFont(company_font)
-            company_rect = QRect(margin, y, content_width, int(row_height * 1.5))
-            painter.drawText(company_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
+            company_text = "四川盛涵物业服务有限公司"
+            company_h = fm_company.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, company_text).height()
+            company_rect = QRect(margin, y, content_width, company_h + 4)
+            painter.drawText(company_rect, Qt.AlignCenter, company_text)
             y += company_rect.height()
             
             # 下划线
@@ -269,9 +277,11 @@ class ReceiptPrinter:
 
             # 收据大标题
             painter.setFont(title_font)
-            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
-            painter.drawText(title_rect, Qt.AlignCenter, "收费收据")
-            y += title_rect.height() + (0 if is_wide_paper else int(row_height * 0.5))
+            title_text = "收费收据"
+            title_h = fm_title.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, title_text).height()
+            title_rect = QRect(margin, y, content_width, title_h + 4)
+            painter.drawText(title_rect, Qt.AlignCenter, title_text)
+            y += title_rect.height() + (0 if is_wide_paper else 4)
             
             # 收据编号
             painter.setFont(normal_font)
@@ -283,9 +293,10 @@ class ReceiptPrinter:
             
             start_x = margin + int((content_width - table_width) / 2)
             
-            # 绘制编号
+            # 绘制编号（使用更紧凑垂直区域）
             receipt_no = f"NO:{payment.id:06d}"
-            painter.drawText(QRect(start_x, y - row_height, table_width, row_height), Qt.AlignRight | Qt.AlignBottom, receipt_no)
+            painter.setFont(normal_font)
+            painter.drawText(QRect(start_x, y - title_rect.height(), table_width, title_rect.height()), Qt.AlignRight | Qt.AlignVCenter, receipt_no)
 
             # 定义列宽
             if is_narrow_paper:
@@ -485,9 +496,11 @@ class ReceiptPrinter:
 
             # 底部签名
             sig_height = row_height
-            # 改为紧跟内容下方，宽纸模式下尽量紧凑
-            sig_offset = 0 if is_wide_paper else int(row_height * 0.5)
+            sig_offset = 0 if is_wide_paper else 4
             sig_y = y + sig_offset
+            # 如果签名区域会超出页底预留（margin），则向上调整
+            if sig_y + sig_height > height - margin:
+                sig_y = max(y, height - margin - sig_height)
             
             left_x = start_x
             right_x = start_x + int(table_width / 2)
@@ -660,7 +673,12 @@ class ReceiptPrinter:
             small_font = get_font(0.9)
             bold_font = get_font(1.0, True)
             
+            # 使用 QFontMetrics 精确控制行高，防止固定倍数导致过大占用
+            fm_normal = QFontMetrics(normal_font)
+            fm_company = QFontMetrics(company_font)
+            fm_title = QFontMetrics(title_font)
             row_height = int(base_pixel_size * row_height_factor)
+            row_height = max(row_height, fm_normal.height() + 6)
 
             # 边距
             margin = int(width * margin_scale)
@@ -682,16 +700,20 @@ class ReceiptPrinter:
 
             # 标题区域
             painter.setFont(company_font)
-            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
-            painter.drawText(title_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
+            comp_text = "四川盛涵物业服务有限公司"
+            comp_h = fm_company.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, comp_text).height()
+            title_rect = QRect(margin, y, content_width, comp_h + 6)
+            painter.drawText(title_rect, Qt.AlignCenter, comp_text)
             # 宽纸且空间紧凑时，减少间距
             y += title_rect.height()
             if not is_wide_paper:
                  y += int(row_height * 0.2)
             
             painter.setFont(title_font)
-            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
-            painter.drawText(title_rect, Qt.AlignCenter, "收费收据（合并）")
+            merge_title = "收费收据（合并）"
+            t_h = fm_title.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, merge_title).height()
+            title_rect = QRect(margin, y, content_width, t_h + 4)
+            painter.drawText(title_rect, Qt.AlignCenter, merge_title)
             y += title_rect.height()
             if not is_wide_paper:
                 y += int(row_height * 0.5)
