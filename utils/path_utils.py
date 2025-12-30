@@ -17,4 +17,10 @@ def get_app_path():
 
 def get_data_path(filename):
     """获取数据文件路径"""
-    return os.path.join(get_app_path(), filename)
+    app_path = get_app_path()
+    candidate = os.path.join(app_path, filename)
+    if os.path.exists(candidate):
+        return candidate
+    # if not found next to exe, try parent directory (handles onedir layout where exe is under a subfolder)
+    parent_candidate = os.path.join(os.path.dirname(app_path), filename)
+    return parent_candidate
