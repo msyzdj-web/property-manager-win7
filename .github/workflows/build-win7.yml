@@ -50,28 +50,43 @@ jobs:
       run: |
         pyinstaller --clean PropertyManager-win7.spec
         
-    - name: 检查打包结果
+    - name: 检查 one-dir 产物（dist\\PropertyManager）
       run: |
-        if (Test-Path "dist\PropertyManager.exe") {
-          Write-Host "打包成功！"
-          Get-Item "dist\PropertyManager.exe" | Select-Object Name, Length, LastWriteTime
+        if (Test-Path "dist\PropertyManager") {
+          Write-Host "one-dir 产物存在：dist\\PropertyManager"
+          Get-ChildItem -Path "dist\PropertyManager" -Recurse | Select-Object FullName, Length
         } else {
-          Write-Host "打包失败：未找到 PropertyManager.exe"
-          exit 1
+          Write-Host "未找到 one-dir 产物 dist\\PropertyManager，尝试查找单个 exe..."
+          if (Test-Path "dist\PropertyManager.exe") {
+            Write-Host "找到单文件 exe：dist\\PropertyManager.exe"
+            Get-Item "dist\PropertyManager.exe" | Select-Object Name, Length, LastWriteTime
+          } else {
+            Write-Host "打包失败：未找到 dist\\PropertyManager 或 dist\\PropertyManager.exe"
+            exit 1
+          }
         }
-        
-    - name: 重命名 exe 文件
+
+    - name: 压缩 one-dir 产物为 ZIP
       run: |
-        if (Test-Path "dist\PropertyManager.exe") {
-          Rename-Item -Path "dist\PropertyManager.exe" -NewName "物业收费管理系统_Win7.exe"
-          Write-Host "文件已重命名为：物业收费管理系统_Win7.exe"
+        if (Test-Path "dist\PropertyManager") {
+          $zipPath = "dist\PropertyManager_win7.zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path "dist\PropertyManager\*" -DestinationPath $zipPath -Force
+          Write-Host "已创建压缩包: $zipPath"
+        } elseif (Test-Path "dist\PropertyManager.exe") {
+          $zipPath = "dist\PropertyManager_win7.zip"
+          if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+          Compress-Archive -Path "dist\PropertyManager.exe" -DestinationPath $zipPath -Force
+          Write-Host "已创建压缩包（单文件 exe）: $zipPath"
+        } else {
+          Write-Host "没有可压缩的产物"; exit 1
         }
-        
-    - name: 上传构建产物
+
+    - name: 上传 one-dir 构建产物 (ZIP)
       uses: actions/upload-artifact@v4
       with:
-        name: PropertyManager-Win7-EXE
-        path: dist/物业收费管理系统_Win7.exe
+        name: PropertyManager-Win7-Artifact
+        path: dist/PropertyManager_win7.zip
         retention-days: 30
         
     - name: 创建 Release 说明

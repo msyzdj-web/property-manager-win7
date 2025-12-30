@@ -68,3 +68,13 @@ exe = EXE(
     version=None,
 )
 
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    name='PropertyManager'
+)
+
