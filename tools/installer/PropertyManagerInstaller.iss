@@ -55,5 +55,3 @@ function Is64BitInstallMode(): Boolean;
 begin
   Result := IsWin64;
 end;
-
-

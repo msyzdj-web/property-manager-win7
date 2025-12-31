@@ -81,6 +81,21 @@ class ReceiptDialog(QDialog):
                 return str(int(round(float(value))))
             except Exception:
                 return str(value)
+
+    def _fmt_amount_two_decimals(self, value):
+        """格式化金额：四舍五入到整数后显示两位小数（例如 1010 -> '1010.00'）"""
+        try:
+            if value is None:
+                return "0.00"
+            v = Decimal(str(value))
+            iv = int(v.quantize(0, rounding=ROUND_HALF_UP))
+            return f"{iv:.2f}"
+        except Exception:
+            try:
+                iv = int(round(float(value)))
+                return f"{iv:.2f}"
+            except Exception:
+                return str(value)
     
     def load_receipt(self):
         """加载收据内容"""
@@ -152,7 +167,7 @@ class ReceiptDialog(QDialog):
                 start_tx = add_months(payment.billing_start_date, prev_paid)
                 end_tx = add_months(start_tx, months_in_tx)
                 paid_period = f"{start_tx.strftime('%Y.%m.%d')}–{end_tx.strftime('%Y.%m.%d')}"
-                paid_amount_display = self._fmt_amount_int(last_tx.amount)
+                paid_amount_display = self._fmt_amount_two_decimals(last_tx.amount)
             else:
                 # 无流水则退回到累计已缴金额显示
                 if getattr(payment, 'paid_months', 0) and payment.paid_months > 0 and payment.billing_start_date:
@@ -166,7 +181,7 @@ class ReceiptDialog(QDialog):
                     start = payment.billing_start_date
                     end_paid = add_months(start, int(payment.paid_months))
                     paid_period = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
-                    paid_amount_display = self._fmt_amount_int(payment.paid_amount) if payment.paid_amount else ""
+                    paid_amount_display = self._fmt_amount_two_decimals(payment.paid_amount) if payment.paid_amount else ""
         except Exception:
             paid_period = ""
             paid_amount_display = ""
@@ -223,6 +238,15 @@ class ReceiptDialog(QDialog):
         except Exception:
             pass
 
+        # 票据序号：前缀保留缴费创建日期（YYYYMMDD），后三位为当日打印序号（预览使用当日下一个序号，不写流水）
+        try:
+            payment_date_str = payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d')
+            from services.print_service import PrintService
+            payment_seq = PrintService.get_today_sequence()
+        except Exception:
+            payment_date_str = datetime.now().strftime('%Y%m%d')
+            payment_seq = getattr(payment, 'id', 1) % 1000 if getattr(payment, 'id', None) else 1
+
         html = f"""
 <html>
 <head>
@@ -246,7 +270,7 @@ body {{
     box-sizing: border-box; 
 }}
 .company {{ font-size:{company_size}; font-weight:700; text-align:center; color:#333; }}
-.divider {{ text-align:center; border-bottom:2px solid #333; width:98%; margin:5px auto {margin_bottom_divider} auto; }}
+.divider {{ display:none; }}
 .title {{ font-size:{title_size}; font-weight:700; text-align:center; margin-top:2px; margin-bottom:5px; }}
 .receipt-no {{ text-align:right; font-size:{base_font_size}; color:#666; margin-bottom:2px; }}
 .info {{ margin-top:2px; margin-bottom:5px; font-size:{base_font_size}; }}
@@ -262,16 +286,15 @@ th {{ background:#f5f5f5; font-weight:600; }}
 <body>
 <div class="receipt-paper">
   <div class="company">{logo_html}四川盛涵物业服务有限公司</div>
-  <div class="divider"></div>
   <div class="title">收费收据</div>
-  <div class="receipt-no">NO:{payment.id:06d}</div>
+  <div class="receipt-no">NO:{payment_date_str}{payment_seq:03d}</div>
   <div class="info">
     <table style="border:none; width:100%;">
       <tr style="border:none;">
         <td style="border:none; padding:2px;">户名：{payment.resident.name}</td>
-        <td style="border:none; padding:2px;">房号：{payment.resident.room_no}</td>
-        <td style="border:none; padding:2px;">日期：{datetime.now().year}年{datetime.now().month}月{datetime.now().day}日</td>
-        <td style="border:none; padding:2px; text-align:right;">NO:{payment.id:06d}</td>
+        <td style="border:none; padding:2px;">房号：{getattr(payment.resident, 'full_room_no', payment.resident.room_no)}</td>
+                <td style="border:none; padding:2px;">日期：{datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}</td>
+        <td style="border:none; padding:2px; text-align:right;">NO:{payment_date_str}{payment_seq:03d}</td>
       </tr>
     </table>
   </div>
@@ -286,7 +309,7 @@ th {{ background:#f5f5f5; font-weight:600; }}
     <tr>
       <td>{payment.charge_item.name if payment.charge_item else ""}</td>
       <td class="center">{billing_period}</td>
-      <td class="center">{self._fmt_amount_int(total_amount)}</td>
+      <td class="center">{self._fmt_amount_two_decimals(total_amount)}</td>
       <td></td>
     </tr>
 """ 
@@ -310,7 +333,7 @@ th {{ background:#f5f5f5; font-weight:600; }}
       <td style="font-weight:700; border:1px solid #000; padding-left:8px;">合计金额大写</td>
       <td style="border:1px solid #000;">{upper_amount}</td>
             <td style="font-weight:700; border:1px solid #000; text-align:center;">合计金额小写</td>
-      <td style="border:1px solid #000; text-align:center;">{self._fmt_amount_int(display_amount)}元</td>
+      <td style="border:1px solid #000; text-align:center;">{self._fmt_amount_two_decimals(display_amount)}元</td>
     </tr>
     <tr>
       <td colspan="4" style="border:1px solid #000; padding:6px 8px; text-align:left;">请确认您的缴费金额，如有疑问请咨询物业服务中心</td>
@@ -431,8 +454,8 @@ th {{ background:#f5f5f5; font-weight:600; }}
 
             # 基本信息
             ws['A4'] = f"户名：{payment.resident.name}"
-            ws['B4'] = f"房号：{payment.resident.room_no}"
-            ws['C4'] = f"日期：{datetime.now().strftime('%Y-%m-%d')}"
+            ws['B4'] = f"房号：{getattr(payment.resident, 'full_room_no', payment.resident.room_no)}"
+            ws['C4'] = f"日期：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
 
             # 表头
             start_row = 6
@@ -457,8 +480,8 @@ th {{ background:#f5f5f5; font-weight:600; }}
                 try:
                     amt_int = int(round(float(payment.amount)))
                 except Exception:
-                    amt_int = float(payment.amount)
-            ws.cell(row=detail_row, column=3, value=amt_int)
+                    amt_int = int(round(float(payment.amount))) if payment.amount else 0
+            ws.cell(row=detail_row, column=3, value=f"{amt_int:.2f}")
             ws.cell(row=detail_row, column=4, value="")
             for col in range(1, 5):
                 c = ws.cell(row=detail_row, column=col)
@@ -482,8 +505,8 @@ th {{ background:#f5f5f5; font-weight:600; }}
                 try:
                     total_int = int(round(float(payment.amount)))
                 except Exception:
-                    total_int = payment.amount
-            ws.cell(row=total_row, column=4, value=f"{total_int}元")
+                    total_int = int(round(float(payment.amount))) if payment.amount else 0
+            ws.cell(row=total_row, column=4, value=f"{total_int:.2f}元")
             for col in range(1, 5):
                 c = ws.cell(row=total_row, column=col)
                 c.border = border

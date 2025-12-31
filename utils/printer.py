@@ -48,10 +48,19 @@ class ReceiptPrinter:
             if output_file:
                 # 如果是 PDF 输出，我们先渲染到一张高分辨率 PNG，再把该图像绘制到 QPrinter 以生成 PDF（兼容性更好）
                 if output_file.lower().endswith('.pdf'):
-                    # 先渲染到临时 PNG
+                    # 先创建打印流水以获取当日序号，再渲染到临时 PNG
+                    try:
+                        from services.print_service import PrintService
+                        print_log = PrintService.create_print_log(payment_id=payment.id)
+                        payment_date_str = payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d')
+                        payment_seq = print_log.seq
+                    except Exception:
+                        payment_date_str = payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d')
+                        payment_seq = None
+                    # 先渲染到临时 PNG，传入序号以在图片中显示
                     tmp_dir = tempfile.gettempdir()
                     tmp_png = os.path.join(tmp_dir, f"receipt_tmp_{payment_id}.png")
-                    ok_img = self.render_receipt_to_image(payment_id, tmp_png, dpi=300)
+                    ok_img = self.render_receipt_to_image(payment_id, tmp_png, dpi=300, payment_date_str=payment_date_str, payment_seq=payment_seq)
                     if not ok_img:
                         return False
                     # 设置打印机输出到 PDF 文件
@@ -116,13 +125,22 @@ class ReceiptPrinter:
                 if print_dialog.exec_() != QPrintDialog.Accepted:
                     return False
             
-            # 开始打印
+            # 开始打印：如果之前未为 PDF 创建流水，则现在创建（适用于直接打印）
+            try:
+                if 'payment_seq' not in locals() or payment_seq is None:
+                    from services.print_service import PrintService
+                    print_log = PrintService.create_print_log(payment_id=payment.id)
+                    payment_date_str = payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d')
+                    payment_seq = print_log.seq
+            except Exception:
+                payment_date_str = payment_date_str if 'payment_date_str' in locals() else (payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d'))
+                payment_seq = payment_seq if 'payment_seq' in locals() else None
+
+            # 开始绘制到打印机
             painter = QPainter()
             painter.begin(self.printer)
-            
-            # 将绘制部分委托给独立函数，便于同时支持打印机和图像渲染
             page_rect = self.printer.pageRect()
-            self._draw_receipt(painter, page_rect, payment)
+            self._draw_receipt(painter, page_rect, payment, payment_date_str=payment_date_str, payment_seq=payment_seq)
             painter.end()
             return True
 
@@ -172,7 +190,7 @@ class ReceiptPrinter:
                 frac_part += nums[fen] + "分"
         return int_part + frac_part
 
-    def _draw_receipt(self, painter: QPainter, page_rect: QRect, payment):
+    def _draw_receipt(self, painter: QPainter, page_rect: QRect, payment, payment_date_str: str = None, payment_seq: int = None):
         """在给定 painter 和页面矩形上绘制收据（不负责 begin/end）"""
         try:
             width = page_rect.width()
@@ -223,23 +241,17 @@ class ReceiptPrinter:
             small_font = get_font(0.9)           # 小字
             bold_font = get_font(1.0, True)      # 正文粗体
 
-            # 使用 QFontMetrics 进行更精确的高度控制
-            fm_normal = QFontMetrics(normal_font)
-            fm_company = QFontMetrics(company_font)
-            fm_title = QFontMetrics(title_font)
-
             # 页面尺寸与边距
             margin = int(width * margin_scale)
             content_width = width - 2 * margin
             y = margin
             
-            # 行高计算（保留原策略，同时确保不小于字体高度）
+            # 行高计算
             if is_wide_paper:
                 # 241x93高度极小，使用极紧凑行高
                 row_height = int(base_pixel_size * 1.5)
             else:
                 row_height = int(base_pixel_size * 2.2)  # 行高为字号的 2.2 倍
-            row_height = max(row_height, fm_normal.height() + 6)
             
             # 顶部公司名称（居中、加下划线效果用线）
             # 尝试绘制LOGO
@@ -257,31 +269,17 @@ class ReceiptPrinter:
                 pass
 
             painter.setFont(company_font)
-            company_text = "四川盛涵物业服务有限公司"
-            company_h = fm_company.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, company_text).height()
-            company_rect = QRect(margin, y, content_width, company_h + 4)
-            painter.drawText(company_rect, Qt.AlignCenter, company_text)
+            company_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(company_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
             y += company_rect.height()
-            
-            # 下划线
-            x1 = int(margin + content_width * 0.1)
-            x2 = int(margin + content_width * 0.9)
-            y_line_int = int(y - row_height * 0.2) if is_wide_paper else int(y - row_height * 0.4) 
-            pen_width = max(1, int(width * 0.002))
-            old_pen = painter.pen()
-            thick_pen = QPen(Qt.black, pen_width)
-            painter.setPen(thick_pen)
-            painter.drawLine(x1, y_line_int, x2, y_line_int)
-            painter.setPen(old_pen)
-            y += int(row_height * 0.1) if is_wide_paper else int(row_height * 0.5)
+            # 去除公司抬头下方横线（需求: 删除公司与“收费收据”之间的横线）
+            y += int(row_height * 0.1) if is_wide_paper else int(row_height * 0.3)
 
             # 收据大标题
             painter.setFont(title_font)
-            title_text = "收费收据"
-            title_h = fm_title.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, title_text).height()
-            title_rect = QRect(margin, y, content_width, title_h + 4)
-            painter.drawText(title_rect, Qt.AlignCenter, title_text)
-            y += title_rect.height() + (0 if is_wide_paper else 4)
+            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(title_rect, Qt.AlignCenter, "收费收据")
+            y += title_rect.height() + (0 if is_wide_paper else int(row_height * 0.5))
             
             # 收据编号
             painter.setFont(normal_font)
@@ -293,10 +291,18 @@ class ReceiptPrinter:
             
             start_x = margin + int((content_width - table_width) / 2)
             
-            # 绘制编号（使用更紧凑垂直区域）
-            receipt_no = f"NO:{payment.id:06d}"
-            painter.setFont(normal_font)
-            painter.drawText(QRect(start_x, y - title_rect.height(), table_width, title_rect.height()), Qt.AlignRight | Qt.AlignVCenter, receipt_no)
+            # 票据编号：前缀为缴费记录创建日期（YYYYMMDD），后三位为打印流水序号（若外部提供则使用，否则预览时读取当日下一个序号）
+            try:
+                if payment_date_str is None:
+                    payment_date_str = payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d')
+                if payment_seq is None:
+                    from services.print_service import PrintService
+                    payment_seq = PrintService.get_today_sequence()
+            except Exception:
+                payment_date_str = payment_date_str or (payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d'))
+                payment_seq = payment_seq or (getattr(payment, 'id', 1) % 1000 if getattr(payment, 'id', None) else 1)
+            receipt_no = f"NO:{payment_date_str}{int(payment_seq):03d}"
+            painter.drawText(QRect(start_x, y - row_height, table_width, row_height), Qt.AlignRight | Qt.AlignBottom, receipt_no)
 
             # 定义列宽
             if is_narrow_paper:
@@ -317,13 +323,13 @@ class ReceiptPrinter:
             # 户名、房号、日期一行（对齐到表格列）
             info_y = y
             now = datetime.now()
-            # 日期格式
+            # 日期格式（包含时分秒）
             if is_narrow_paper:
-                date_text = f"{now.year}.{now.month}.{now.day}"
-                info_text = f"户名:{payment.resident.name} 房号:{payment.resident.room_no}"
+                date_text = now.strftime("%Y.%m.%d %H:%M:%S")
+                info_text = f"户名:{payment.resident.name} 房号:{getattr(payment.resident, 'full_room_no', payment.resident.room_no)}"
             else:
-                date_text = f"日期：{now.year}年{now.month}月{now.day}日"
-                info_text = f"户名：{payment.resident.name}    房号：{payment.resident.room_no}"
+                date_text = f"日期：{now.strftime('%Y年%m月%d日 %H:%M:%S')}"
+                info_text = f"户名：{payment.resident.name}    房号：{getattr(payment.resident, 'full_room_no', payment.resident.room_no)}"
             
             painter.drawText(QRect(start_x, info_y, c1 + c2, row_height), Qt.AlignLeft | Qt.AlignVCenter, info_text)
             painter.drawText(QRect(start_x + c1 + c2, info_y, c3 + c4, row_height), Qt.AlignRight | Qt.AlignVCenter, date_text)
@@ -343,10 +349,12 @@ class ReceiptPrinter:
                         billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
                 # 将金额四舍五入为整数元用于显示
                 try:
-                    amount_text = str(int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP))) if getattr(payment, 'amount', None) is not None else ""
+                    amt_int = int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP)) if getattr(payment, 'amount', None) is not None else 0
+                    amount_text = f"{amt_int:.2f}" if getattr(payment, 'amount', None) is not None else ""
                 except Exception:
                     try:
-                        amount_text = str(int(round(float(payment.amount)))) if getattr(payment, 'amount', None) is not None else ""
+                        amt_int = int(round(float(payment.amount))) if getattr(payment, 'amount', None) is not None else 0
+                        amount_text = f"{amt_int:.2f}" if getattr(payment, 'amount', None) is not None else ""
                     except Exception:
                         amount_text = str(payment.amount) if getattr(payment, 'amount', None) is not None else ""
                 if (item_name and item_name.strip()) or (billing_period and billing_period.strip()) or (amount_text and amount_text.strip()):
@@ -434,10 +442,12 @@ class ReceiptPrinter:
                     else:
                         paid_period_text = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
                     try:
-                        paid_amount_text = str(int(Decimal(str(payment.paid_amount)).quantize(0, rounding=ROUND_HALF_UP))) if payment.paid_amount else "0"
+                        paid_amt_int = int(Decimal(str(payment.paid_amount)).quantize(0, rounding=ROUND_HALF_UP)) if payment.paid_amount else 0
+                        paid_amount_text = f"{paid_amt_int:.2f}" if payment.paid_amount else "0.00"
                     except Exception:
                         try:
-                            paid_amount_text = str(int(round(float(payment.paid_amount)))) if payment.paid_amount else "0"
+                            paid_amt_int = int(round(float(payment.paid_amount))) if payment.paid_amount else 0
+                            paid_amount_text = f"{paid_amt_int:.2f}" if payment.paid_amount else "0.00"
                         except Exception:
                             paid_amount_text = str(payment.paid_amount or "0")
                     
@@ -479,12 +489,14 @@ class ReceiptPrinter:
             painter.setFont(normal_font)
             # 合计显示为整数元
             try:
-                display_amount_str = str(int(Decimal(str(display_amount)).quantize(0, rounding=ROUND_HALF_UP)))
+                disp_int = int(Decimal(str(display_amount)).quantize(0, rounding=ROUND_HALF_UP))
+                display_amount_str = f"{disp_int:.2f}"
             except Exception:
                 try:
-                    display_amount_str = str(int(round(float(display_amount))))
+                    disp_int = int(round(float(display_amount)))
+                    display_amount_str = f"{disp_int:.2f}"
                 except Exception:
-                    display_amount_str = str(display_amount)
+                    display_amount_str = f"{float(display_amount):.2f}"
             painter.drawText(QRect(start_x + c1 + c2 + c3, total_y, c4, row_height), Qt.AlignCenter | Qt.AlignVCenter, f"{display_amount_str}元")
             y += row_height
 
@@ -496,11 +508,9 @@ class ReceiptPrinter:
 
             # 底部签名
             sig_height = row_height
-            sig_offset = 0 if is_wide_paper else 4
+            # 改为紧跟内容下方，宽纸模式下尽量紧凑
+            sig_offset = 0 if is_wide_paper else int(row_height * 0.5)
             sig_y = y + sig_offset
-            # 如果签名区域会超出页底预留（margin），则向上调整
-            if sig_y + sig_height > height - margin:
-                sig_y = max(y, height - margin - sig_height)
             
             left_x = start_x
             right_x = start_x + int(table_width / 2)
@@ -512,7 +522,7 @@ class ReceiptPrinter:
             raise
 
 
-    def render_receipt_to_image(self, payment_id, output_path, dpi=300):
+    def render_receipt_to_image(self, payment_id, output_path, dpi=300, payment_date_str: str = None, payment_seq: int = None):
         """将收据渲染为高分辨率 PNG 图像并保存"""
         try:
             payment = PaymentService.get_payment_by_id(payment_id)
@@ -542,7 +552,7 @@ class ReceiptPrinter:
             
             # 使用与打印器相同的 page_rect（像素坐标）
             page_rect = QRect(0, 0, width_px, height_px)
-            self._draw_receipt(painter, page_rect, payment)
+            self._draw_receipt(painter, page_rect, payment, payment_date_str=payment_date_str, payment_seq=payment_seq)
             painter.end()
             # 保存图像（PNG）
             ok = image.save(output_path)
@@ -673,12 +683,7 @@ class ReceiptPrinter:
             small_font = get_font(0.9)
             bold_font = get_font(1.0, True)
             
-            # 使用 QFontMetrics 精确控制行高，防止固定倍数导致过大占用
-            fm_normal = QFontMetrics(normal_font)
-            fm_company = QFontMetrics(company_font)
-            fm_title = QFontMetrics(title_font)
             row_height = int(base_pixel_size * row_height_factor)
-            row_height = max(row_height, fm_normal.height() + 6)
 
             # 边距
             margin = int(width * margin_scale)
@@ -700,20 +705,16 @@ class ReceiptPrinter:
 
             # 标题区域
             painter.setFont(company_font)
-            comp_text = "四川盛涵物业服务有限公司"
-            comp_h = fm_company.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, comp_text).height()
-            title_rect = QRect(margin, y, content_width, comp_h + 6)
-            painter.drawText(title_rect, Qt.AlignCenter, comp_text)
+            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(title_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
             # 宽纸且空间紧凑时，减少间距
             y += title_rect.height()
             if not is_wide_paper:
                  y += int(row_height * 0.2)
             
             painter.setFont(title_font)
-            merge_title = "收费收据（合并）"
-            t_h = fm_title.boundingRect(0, 0, content_width, 0, Qt.AlignCenter, merge_title).height()
-            title_rect = QRect(margin, y, content_width, t_h + 4)
-            painter.drawText(title_rect, Qt.AlignCenter, merge_title)
+            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            painter.drawText(title_rect, Qt.AlignCenter, "收费收据（合并）")
             y += title_rect.height()
             if not is_wide_paper:
                 y += int(row_height * 0.5)
@@ -798,12 +799,14 @@ class ReceiptPrinter:
                 except Exception:
                     display_line_amount = float(p.amount or 0.0)
 
-                # 显示为整数元
+                # 显示为整数后保留两位小数
                 try:
-                    amount_text = str(int(Decimal(str(display_line_amount)).quantize(0, rounding=ROUND_HALF_UP)))
+                    amt_int = int(Decimal(str(display_line_amount)).quantize(0, rounding=ROUND_HALF_UP))
+                    amount_text = f"{amt_int:.2f}"
                 except Exception:
                     try:
-                        amount_text = str(int(round(float(display_line_amount))))
+                        amt_int = int(round(float(display_line_amount)))
+                        amount_text = f"{amt_int:.2f}"
                     except Exception:
                         amount_text = str(display_line_amount)
                 painter.drawText(QRect(int(start_x + 6), int(y + 4), int(col_widths[0] - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignVCenter, item_name)
@@ -824,7 +827,16 @@ class ReceiptPrinter:
             painter.setFont(bold_font)
             painter.drawText(QRect(int(start_x + col_widths[0] + col_widths[1] + 6), int(total_y + 4), int(col_widths[2] - 12), int(row_height - 8)), Qt.AlignLeft | Qt.AlignVCenter, "合计金额小写")
             painter.setFont(normal_font)
-            painter.drawText(QRect(int(start_x + col_widths[0] + col_widths[1] + col_widths[2] + 6), int(total_y + 4), int(col_widths[3] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, f"{display_amount:.2f}元")
+            try:
+                disp_int = int(Decimal(str(display_amount)).quantize(0, rounding=ROUND_HALF_UP))
+                disp_text = f"{disp_int:.2f}元"
+            except Exception:
+                try:
+                    disp_int = int(round(float(display_amount)))
+                    disp_text = f"{disp_int:.2f}元"
+                except Exception:
+                    disp_text = f"{float(display_amount):.2f}元"
+            painter.drawText(QRect(int(start_x + col_widths[0] + col_widths[1] + col_widths[2] + 6), int(total_y + 4), int(col_widths[3] - 12), int(row_height - 8)), Qt.AlignCenter | Qt.AlignVCenter, disp_text)
             y = total_y + row_height
 
             # 提示行

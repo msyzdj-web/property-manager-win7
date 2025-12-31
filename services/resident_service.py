@@ -47,7 +47,7 @@ class ResidentService:
                 db.close()
     
     @staticmethod
-    def create_resident(room_no: str, name: str, phone: str = '', area: float = 0.0, 
+    def create_resident(building: str = '', unit: str = '', room_no: str = '', name: str = None, phone: str = '', area: float = 0.0, 
                        move_in_date=None, identity: str = 'owner', property_type: str = 'residential', db: Session = None):
         """创建住户"""
         if db is None:
@@ -59,6 +59,8 @@ class ResidentService:
                 raise ValueError(f"房号 {room_no} 已存在")
             
             resident = Resident(
+                building=building,
+                unit=unit,
                 room_no=room_no,
                 name=name,
                 phone=phone,
@@ -83,7 +85,7 @@ class ResidentService:
                 db.close()
     
     @staticmethod
-    def update_resident(resident_id: int, room_no: str = None, name: str = None, 
+    def update_resident(resident_id: int, building: str = None, unit: str = None, room_no: str = None, name: str = None, 
                        phone: str = None, area: float = None, move_in_date=None, 
                        status: int = None, identity: str = None, property_type: str = None, db: Session = None):
         """更新住户信息"""
@@ -100,6 +102,11 @@ class ResidentService:
                 if existing and existing.id != resident_id:
                     raise ValueError(f"房号 {room_no} 已存在")
                 resident.room_no = room_no
+            
+            if building is not None:
+                resident.building = building
+            if unit is not None:
+                resident.unit = unit
             
             if name is not None:
                 resident.name = name

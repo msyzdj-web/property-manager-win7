@@ -26,6 +26,22 @@ class ResidentDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
+        # 楼栋
+        building_layout = QHBoxLayout()
+        building_layout.addWidget(QLabel('楼栋:'))
+        self.building_input = QLineEdit()
+        self.building_input.setPlaceholderText('请输入楼栋')
+        building_layout.addWidget(self.building_input)
+        layout.addLayout(building_layout)
+
+        # 单元
+        unit_layout = QHBoxLayout()
+        unit_layout.addWidget(QLabel('单元:'))
+        self.unit_input = QLineEdit()
+        self.unit_input.setPlaceholderText('请输入单元')
+        unit_layout.addWidget(self.unit_input)
+        layout.addLayout(unit_layout)
+
         # 房号
         room_layout = QHBoxLayout()
         room_layout.addWidget(QLabel('房号*:'))
@@ -115,6 +131,11 @@ class ResidentDialog(QDialog):
                         resident.move_in_date.month,
                         resident.move_in_date.day
                     ))
+                # 楼栋/单元（兼容旧数据）
+                if hasattr(resident, 'building'):
+                    self.building_input.setText(resident.building or '')
+                if hasattr(resident, 'unit'):
+                    self.unit_input.setText(resident.unit or '')
                 # 身份
                 if hasattr(resident, 'identity') and resident.identity:
                     idx = 0 if resident.identity == 'owner' else 1
@@ -147,6 +168,8 @@ class ResidentDialog(QDialog):
                 # 更新
                 ResidentService.update_resident(
                     self.resident_id,
+                    building=self.building_input.text().strip(),
+                    unit=self.unit_input.text().strip(),
                     room_no=room_no,
                     name=name,
                     phone=phone,
@@ -159,6 +182,8 @@ class ResidentDialog(QDialog):
             else:
                 # 新增
                 ResidentService.create_resident(
+                    building=self.building_input.text().strip(),
+                    unit=self.unit_input.text().strip(),
                     room_no=room_no,
                     name=name,
                     phone=phone,

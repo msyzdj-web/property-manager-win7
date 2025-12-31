@@ -12,6 +12,8 @@ class Resident(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     room_no = Column(String(50), unique=True, nullable=False, comment='房号')
     name = Column(String(100), nullable=False, comment='姓名')
+    building = Column(String(20), comment='楼栋')
+    unit = Column(String(20), comment='单元')
     phone = Column(String(20), comment='电话')
     area = Column(Numeric(10, 2), comment='面积')
     move_in_date = Column(DateTime, comment='入住日期')
@@ -29,6 +31,8 @@ class Resident(Base):
         return {
             'id': self.id,
             'room_no': self.room_no,
+            'building': self.building if hasattr(self, 'building') else '',
+            'unit': self.unit if hasattr(self, 'unit') else '',
             'name': self.name,
             'phone': self.phone or '',
             'area': float(self.area) if self.area else 0.0,
@@ -39,4 +43,13 @@ class Resident(Base):
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else '',
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else ''
         }
+
+    @property
+    def full_room_no(self):
+        """返回完整房号字符串，例如：'6-1-1204'。若楼栋/单元为空，返回 room_no 本身。"""
+        b = getattr(self, 'building', None)
+        u = getattr(self, 'unit', None)
+        if b and u:
+            return f"{b}-{u}-{self.room_no}"
+        return self.room_no
 

@@ -55,6 +55,24 @@ def migrate_database():
             cursor.execute("UPDATE residents SET property_type = 'residential' WHERE property_type IS NULL")
             print("✓ residents.property_type 字段已添加")
         
+        # 检查并添加 residents.building 字段（楼栋）
+        try:
+            cursor.execute("SELECT building FROM residents LIMIT 1")
+        except sqlite3.OperationalError:
+            print("添加 residents.building 字段...")
+            cursor.execute("ALTER TABLE residents ADD COLUMN building VARCHAR(20)")
+            cursor.execute("UPDATE residents SET building = '' WHERE building IS NULL")
+            print("✓ residents.building 字段已添加")
+
+        # 检查并添加 residents.unit 字段（单元）
+        try:
+            cursor.execute("SELECT unit FROM residents LIMIT 1")
+        except sqlite3.OperationalError:
+            print("添加 residents.unit 字段...")
+            cursor.execute("ALTER TABLE residents ADD COLUMN unit VARCHAR(20)")
+            cursor.execute("UPDATE residents SET unit = '' WHERE unit IS NULL")
+            print("✓ residents.unit 字段已添加")
+        
         # 检查并添加 payments 表的新字段
         try:
             cursor.execute("SELECT billing_start_date FROM payments LIMIT 1")
@@ -179,6 +197,22 @@ def migrate_database():
         except Exception as e:
             conn.rollback()
             print(f"创建 payment_transactions 表失败：{e}")
+        
+        # 确保 print_logs 表存在（记录打印流水）
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS print_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    payment_id INTEGER,
+                    seq INTEGER NOT NULL,
+                    printed_at DATETIME DEFAULT (datetime('now'))
+                )
+            """)
+            print("✓ print_logs 表已存在或创建完成")
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"创建 print_logs 表失败：{e}")
         
         conn.commit()
         print("\n数据库迁移完成！")
