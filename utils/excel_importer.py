@@ -35,11 +35,13 @@ class ExcelImporter:
                     continue
                 
                 try:
-                    # 解析数据（列顺序：房号、姓名、电话、面积、入住日期[, 身份(identity), 房屋类型(property_type)]）
-                    room_no = str(row[0]).strip() if row[0] else ''
-                    name = str(row[1]).strip() if len(row) > 1 and row[1] else ''
-                    phone = str(row[2]).strip() if len(row) > 2 and row[2] else ''
-                    area = float(row[3]) if len(row) > 3 and row[3] else 0.0
+                    # 解析数据（列顺序：楼栋、单元、房号、姓名、电话、面积、入住日期[, 身份(identity), 房屋类型(property_type)]）
+                    building = str(row[0]).strip() if row[0] else ''
+                    unit = str(row[1]).strip() if len(row) > 1 and row[1] else ''
+                    room_no = str(row[2]).strip() if len(row) > 2 and row[2] else ''
+                    name = str(row[3]).strip() if len(row) > 3 and row[3] else ''
+                    phone = str(row[4]).strip() if len(row) > 4 and row[4] else ''
+                    area = float(row[5]) if len(row) > 5 and row[5] else 0.0
                     
                     # 解析入住日期
                     move_in_date = None
@@ -55,9 +57,9 @@ class ExcelImporter:
                                 except:
                                     pass
                     
-                    # 可选字段：identity, property_type
-                    identity = str(row[5]).strip().lower() if len(row) > 5 and row[5] else 'owner'
-                    property_type = str(row[6]).strip().lower() if len(row) > 6 and row[6] else 'residential'
+                    # 可选字段：入住日期后为 identity, property_type （可选）
+                    identity = str(row[6]).strip().lower() if len(row) > 6 and row[6] else 'owner'
+                    property_type = str(row[7]).strip().lower() if len(row) > 7 and row[7] else 'residential'
                     # 标准化可能的中文输入
                     if identity in ['房主', 'owner', '业主']:
                         identity = 'owner'
@@ -79,8 +81,10 @@ class ExcelImporter:
                         errors.append(f"第{row_idx}行：房号或姓名为空")
                         continue
                     
-                    # 创建住户（传入可选 identity 和 property_type）
+                    # 创建住户（传入可选 building、unit、identity 和 property_type）
                     ResidentService.create_resident(
+                        building=building,
+                        unit=unit,
                         room_no=room_no,
                         name=name,
                         phone=phone,
@@ -114,19 +118,21 @@ class ExcelImporter:
         sheet = workbook.active
         
         # 设置标题行（包含可选列 identity 和 property_type）
-        headers = ['房号', '姓名', '电话', '面积', '入住日期', '身份(identity，可选：房主/租户)', '房屋类型(property_type，可选：住宅/商铺)']
+        headers = ['楼栋', '单元', '房号', '姓名', '电话', '面积', '入住日期', '身份(identity，可选：房主/租户)', '房屋类型(property_type，可选：住宅/商铺)']
         sheet.append(headers)
         
-        # 设置列宽
-        sheet.column_dimensions['A'].width = 15
-        sheet.column_dimensions['B'].width = 15
-        sheet.column_dimensions['C'].width = 15
-        sheet.column_dimensions['D'].width = 12
-        sheet.column_dimensions['E'].width = 15
+        # 设置列宽（适配新增列）
+        sheet.column_dimensions['A'].width = 8   # 楼栋
+        sheet.column_dimensions['B'].width = 8   # 单元
+        sheet.column_dimensions['C'].width = 12  # 房号
+        sheet.column_dimensions['D'].width = 15  # 姓名
+        sheet.column_dimensions['E'].width = 15  # 电话
+        sheet.column_dimensions['F'].width = 12  # 面积
+        sheet.column_dimensions['G'].width = 15  # 入住日期
         
         # 添加示例数据（包含可选列）
-        sheet.append(['101', '张三', '13800138000', '80.5', '2024-01-01', '房主', '住宅'])
-        sheet.append(['102', '李四', '13900139000', '90.0', '2024-02-01', '租户', '商铺'])
+        sheet.append(['6', '1', '1204', '张三', '13800138000', '80.5', '2024-01-01', '房主', '住宅'])
+        sheet.append(['6', '2', '1002', '李四', '13900139000', '90.0', '2024-02-01', '租户', '商铺'])
         
         # 保存文件
         workbook.save(file_path)

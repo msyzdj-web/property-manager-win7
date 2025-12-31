@@ -24,7 +24,7 @@ class ImportDialog(QDialog):
         layout = QVBoxLayout(self)
         
         # 说明
-        info_label = QLabel('支持格式：Excel (.xlsx, .xls)\n\n列顺序：房号、姓名、电话、面积、入住日期[, 身份(identity，可选：房主/租户), 房屋类型(property_type，可选：住宅/商铺)]\n\n第一行为标题行，将从第二行开始读取数据。identity 与 property_type 为可选列，缺省为 房主 / 住宅')
+        info_label = QLabel('支持格式：Excel (.xlsx, .xls)\n\n列顺序：楼栋、单元、房号、姓名、电话、面积、入住日期[, 身份(identity，可选：房主/租户), 房屋类型(property_type，可选：住宅/商铺)]\n\n第一行为标题行，将从第二行开始读取数据。identity 与 property_type 为可选列，缺省为 房主 / 住宅')
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
         

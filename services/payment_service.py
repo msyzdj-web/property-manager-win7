@@ -348,6 +348,79 @@ class PaymentService:
                 db.close()
 
     @staticmethod
+    def get_daily_sequence_for_payment(payment, db: Session = None):
+        """返回指定 payment 在其创建日期的当天序号（从1开始），用于票据序号生成。
+        逻辑：统计当日所有 created_at 在当日范围内且 id <= payment.id 的记录数。
+        """
+        from datetime import datetime, timedelta
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
+        try:
+            created_at = getattr(payment, 'created_at', None)
+            if not created_at:
+                created_at = datetime.now()
+            start = datetime(created_at.year, created_at.month, created_at.day)
+            end = start + timedelta(days=1)
+            count = db.query(func.count(Payment.id)).filter(
+                Payment.created_at >= start,
+                Payment.created_at < end,
+                Payment.id <= payment.id
+            ).scalar()
+            return int(count) if count else 0
+        finally:
+            if close_db and db is not None:
+                db.close()
+
+    @staticmethod
+    def get_daily_sequence_for_date(date: datetime = None, db: Session = None):
+        """返回指定日期（缺省为今天）的当日序号（下一个序号），用于票据序号生成。
+        实现：统计该日已有的 payments 数量，并返回 count + 1。
+        """
+        from datetime import datetime, timedelta
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
+        try:
+            if date is None:
+                date = datetime.now()
+            start = datetime(date.year, date.month, date.day)
+            end = start + timedelta(days=1)
+            count = db.query(func.count(Payment.id)).filter(
+                Payment.created_at >= start,
+                Payment.created_at < end
+            ).scalar()
+            return int(count) + 1
+        finally:
+            if close_db and db is not None:
+                db.close()
+
+    @staticmethod
+    def get_daily_sequence_for_date(target_date, db: Session = None):
+        """返回指定日期的当日序号（从1开始），用于按打印日期生成票据序号。
+        逻辑：统计当日所有 created_at 在当日范围内的记录数并返回 count+1。
+        """
+        from datetime import datetime, timedelta
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
+        try:
+            start = datetime(target_date.year, target_date.month, target_date.day)
+            end = start + timedelta(days=1)
+            count = db.query(func.count(Payment.id)).filter(
+                Payment.created_at >= start,
+                Payment.created_at < end
+            ).scalar()
+            cnt = int(count) if count else 0
+            return cnt + 1
+        finally:
+            if close_db and db is not None:
+                db.close()
+
+    @staticmethod
     def get_statistics_by_year(year: int, db: Session = None):
         """按年获取统计信息（按收费项目分组）"""
         if db is None:

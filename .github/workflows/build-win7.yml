@@ -1,104 +1,121 @@
-name: Build Windows 7 Compatible EXE
+name: Build Windows 7 Compatible EXE (one-dir)
 
 on:
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
   push:
     branches:
       - main
       - master
-    paths:
-      - 'main.py'
-      - 'requirements-win7.txt'
-      - 'PropertyManager-win7.spec'
-      - '.github/workflows/build-win7.yml'
-  release:
-    types: [created]
 
 jobs:
-  build:
-    runs-on: windows-latest  # 使用 Windows Server 环境
-    
+  build-win7:
+    name: Build (Windows, Python 3.8.10, PyInstaller 4.10) -> onedir (PropertyManager-win7.spec)
+    runs-on: windows-latest
     steps:
-    - name: 检出代码
-      uses: actions/checkout@v3
-      
-    - name: 设置 Python 3.8.10
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.8.10'
-        architecture: 'x64'
-        
-    - name: 显示 Python 版本
-      run: python --version
-      
-    - name: 升级 pip
-      run: python -m pip install --upgrade pip
-      
-    - name: 安装 Windows 7 兼容依赖
-      run: |
-        pip install -r requirements-win7.txt
-        
-    - name: 验证 PyInstaller 版本
-      run: pyinstaller --version
-      
-    - name: 清理旧构建
-      run: |
-        if (Test-Path build) { Remove-Item -Recurse -Force build }
-        if (Test-Path dist) { Remove-Item -Recurse -Force dist }
-        
-    - name: 打包应用程序
-      run: |
-        pyinstaller --clean PropertyManager-win7.spec
-        
-    - name: 检查打包结果
-      run: |
-        if (Test-Path "dist\PropertyManager.exe") {
-          Write-Host "打包成功！"
-          Get-Item "dist\PropertyManager.exe" | Select-Object Name, Length, LastWriteTime
-        } else {
-          Write-Host "打包失败：未找到 PropertyManager.exe"
-          exit 1
-        }
-        
-    - name: 重命名 exe 文件
-      run: |
-        if (Test-Path "dist\PropertyManager.exe") {
-          Rename-Item -Path "dist\PropertyManager.exe" -NewName "物业收费管理系统_Win7.exe"
-          Write-Host "文件已重命名为：物业收费管理系统_Win7.exe"
-        }
-        
-    - name: 上传构建产物
-      uses: actions/upload-artifact@v4
-      with:
-        name: PropertyManager-Win7-EXE
-        path: dist/物业收费管理系统_Win7.exe
-        retention-days: 30
-        
-    - name: 创建 Release 说明
-      if: github.event_name == 'release'
-      run: |
-        $releaseNotes = @"
-        ## Windows 7 兼容版本
-        
-        ### 系统要求
-        - Windows 7 SP1 或更高版本
-        - Visual C++ Redistributable 2015-2022
-        
-        ### 安装说明
-        1. 下载 `物业收费管理系统_Win7.exe`
-        2. 双击运行即可（首次运行可能需要较长时间解压）
-        3. 程序会在同目录下创建 `property.db` 数据库文件
-        
-        ### 技术信息
-        - Python 3.8.10
-        - PyInstaller 4.10
-        - PyQt5 5.15.10
-        - SQLAlchemy 1.4.46
-        
-        ### 注意事项
-        - 首次运行可能需要 10-30 秒解压
-        - 如果遇到杀毒软件拦截，请添加信任
-        - 建议将 exe 放在固定目录，避免移动后丢失数据库路径
-        "@
-        Set-Content -Path "RELEASE_NOTES.md" -Value $releaseNotes
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.8.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8.10'
+          architecture: 'x64'
+
+      - name: Upgrade pip and install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if (Test-Path requirements-win7.txt) { pip install -r requirements-win7.txt } else { pip install -r requirements.txt }
+          pip install pyinstaller==4.10
+
+      - name: Clean previous builds
+        run: |
+          if (Test-Path build) { Remove-Item -Recurse -Force build }
+          if (Test-Path dist) { Remove-Item -Recurse -Force dist }
+
+      - name: Build with PyInstaller (onedir) from main.py
+        run: |
+          # ensure explicit dist output folder to produce a proper onedir layout
+          pyinstaller --clean --noconfirm --log-level=DEBUG --onedir --windowed --distpath "dist/PropertyManager" main.py
+          # copy runtime data files (DB, icons, logos) into the onedir so users who download the zip get a runnable package
+          if (Test-Path 'property.db') { Copy-Item -Path 'property.db' -Destination 'dist/PropertyManager' -Force }
+          Get-ChildItem -Path . -Include 'logo.*','*.ico','*.jpg' -File -ErrorAction SilentlyContinue | ForEach-Object { Copy-Item -Path $_.FullName -Destination 'dist/PropertyManager' -Force }
+
+      - name: List build output
+        run: |
+          if (Test-Path -Path "dist") {
+            Get-ChildItem -Path dist -Recurse -File | ForEach-Object { Write-Output $_.FullName }
+          } else {
+            Write-Output "dist not found"
+          }
+
+      - name: Archive onedir and upload artifact
+        run: |
+          if (Test-Path "dist/PropertyManager") {
+            $zip = "dist/PropertyManager-Win7-OneDir.zip"
+            if (Test-Path $zip) { Remove-Item $zip -Force }
+            # Compress the entire folder so subdirectories are preserved
+            Compress-Archive -Path "dist/PropertyManager" -DestinationPath $zip -Force
+            Write-Output "Created zip: $zip"
+          } else {
+            Write-Output "dist/PropertyManager not found; listing dist:"
+            dir dist -Recurse
+            exit 1
+          }
+      - name: Upload onedir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PropertyManager-Win7-OneDir
+          path: dist/PropertyManager-Win7-OneDir.zip
+          retention-days: 30
+
+      - name: Build one-file EXE from spec (optional)
+        run: |
+          if (Test-Path "PropertyManager-win7.spec") {
+            Write-Output "Building one-file EXE using spec (will use runtime_tmpdir from spec)"
+            pyinstaller --clean --noconfirm --log-level=DEBUG PropertyManager-win7.spec --distpath "dist/PropertyManager-EXE"
+            $zipExe = "dist/PropertyManager-Win7-EXE.zip"
+            if (Test-Path $zipExe) { Remove-Item $zipExe -Force }
+            Compress-Archive -Path "dist/PropertyManager-EXE" -DestinationPath $zipExe -Force
+            Write-Output "Created one-file zip: $zipExe"
+          } else {
+            Write-Output "spec not found, skipping one-file build"
+          }
+        continue-on-error: true
+
+      - name: Upload one-file artifact (if created)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PropertyManager-Win7-EXE
+          path: dist/PropertyManager-Win7-EXE.zip
+          retention-days: 30
+
+      - name: Build Windows installer with Inno Setup (optional)
+        run: |
+          # Install Inno Setup via Chocolatey (available on windows-latest runners)
+          choco install innosetup -y
+          # Prepare installer files directory and download VC++ redistributables (optional but recommended)
+          New-Item -Path 'tools/installer/installer_files' -ItemType Directory -Force | Out-Null
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile 'tools/installer/installer_files/vc_redist_x64.exe' -UseBasicParsing -ErrorAction SilentlyContinue
+          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x86.exe' -OutFile 'tools/installer/installer_files/vc_redist_x86.exe' -UseBasicParsing -ErrorAction SilentlyContinue
+          # Build installer (ISCC path installed by choco)
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'tools\installer\PropertyManagerInstaller.iss'
+          Write-Output "Installer build complete. Listing installer outputs:"
+          Get-ChildItem -Path 'tools/installer' -Filter 'PropertyManager-Installer*.exe' -Recurse | ForEach-Object { Write-Output $_.FullName }
+        continue-on-error: true
+
+      - name: Upload installer artifact (if created)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: PropertyManager-Installer
+          path: tools/installer/PropertyManager-Installer*.exe
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: build/
 
