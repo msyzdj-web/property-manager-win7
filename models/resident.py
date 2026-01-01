@@ -1,7 +1,7 @@
 """
 住户模型
 """
-from sqlalchemy import Column, Integer, String, Numeric, DateTime, func
+from sqlalchemy import Column, Integer, String, Numeric, DateTime, func, UniqueConstraint
 from models.database import Base
 from sqlalchemy import UniqueConstraint
 
@@ -9,12 +9,13 @@ from sqlalchemy import UniqueConstraint
 class Resident(Base):
     """住户表"""
     __tablename__ = 'residents'
+    __table_args__ = (UniqueConstraint('building', 'unit', 'room_no', name='uq_building_unit_room'),)
     __table_args__ = (
         UniqueConstraint('building', 'unit', 'room_no', name='uq_building_unit_room'),
     )
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    room_no = Column(String(50), unique=True, nullable=False, comment='房号')
+    room_no = Column(String(50), nullable=False, comment='房号')
     name = Column(String(100), nullable=False, comment='姓名')
     building = Column(String(20), comment='楼栋')
     unit = Column(String(20), comment='单元')

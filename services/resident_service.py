@@ -49,6 +49,21 @@ class ResidentService:
 
     @staticmethod
     def get_resident_by_triplet(building: str, unit: str, room_no: str, db: Session = None):
+        """根据 (building, unit, room_no) 获取住户"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            return db.query(Resident).filter(
+                Resident.building == (building or ''),
+                Resident.unit == (unit or ''),
+                Resident.room_no == room_no
+            ).first()
+        finally:
+            if db is not None:
+                db.close()
+
+    @staticmethod
+    def get_resident_by_triplet(building: str, unit: str, room_no: str, db: Session = None):
         """根据 (building, unit, room_no) 三元组获取住户（全部匹配）"""
         if db is None:
             db = SessionLocal()

@@ -86,10 +86,9 @@ class ExcelImporter:
                         errors.append(f"第{row_idx}行：房号或姓名为空")
                         continue
                     
-                    # 若房号已存在，则更新；否则创建新的住户（存在则更新逻辑）
-                    existing = ResidentService.get_resident_by_room_no(room_no)
+                    # 若以 (building,unit,room_no) 存在则更新；否则创建新的住户
+                    existing = ResidentService.get_resident_by_triplet(building, unit, room_no)
                     if existing:
-                        # 使用 update_resident 保持原有记录 id，避免唯一性冲突
                         ResidentService.update_resident(
                             existing.id,
                             building=building,
