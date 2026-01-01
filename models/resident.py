@@ -46,10 +46,21 @@ class Resident(Base):
 
     @property
     def full_room_no(self):
-        """返回完整房号字符串，例如：'6-1-1204'。若楼栋/单元为空，返回 room_no 本身。"""
+        """返回完整房号字符串，例如：'6-1-1204'。
+        规则：按‘楼栋-单元-房号’拼接非空部分，若楼栋/单元缺失则自动跳过对应部分，始终返回字符串。
+        例如：
+          - building=6, unit=1, room_no=1204 -> '6-1-1204'
+          - building='', unit=2, room_no=1002  -> '2-1002'
+          - building=None, unit=None, room_no=1306 -> '1306'
+        """
+        parts = []
         b = getattr(self, 'building', None)
         u = getattr(self, 'unit', None)
-        if b and u:
-            return f"{b}-{u}-{self.room_no}"
-        return self.room_no
+        if b is not None and str(b).strip() != '':
+            parts.append(str(b).strip())
+        if u is not None and str(u).strip() != '':
+            parts.append(str(u).strip())
+        # 房号总是加入，保证非空输出
+        parts.append(str(self.room_no).strip())
+        return "-".join(parts)
 
