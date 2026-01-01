@@ -68,7 +68,7 @@ class BatchPaymentWorker(QThread):
                     amount=amount
                 )
                 success_count += 1
-                self.progress.emit(idx, total, f"{resident.room_no} - {resident.name}")
+                self.progress.emit(idx, total, f"{getattr(resident, 'full_room_no', resident.room_no)} - {resident.name}")
                 
             except ValueError as e:
                 fail_count += 1

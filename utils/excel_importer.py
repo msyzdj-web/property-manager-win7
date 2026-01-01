@@ -41,6 +41,11 @@ class ExcelImporter:
                     room_no = str(row[2]).strip() if len(row) > 2 and row[2] else ''
                     name = str(row[3]).strip() if len(row) > 3 and row[3] else ''
                     phone = str(row[4]).strip() if len(row) > 4 and row[4] else ''
+                    # 清洗电话字段：去掉末尾或内部常见分隔符（如分号、空格），保留数字及+号
+                    if phone:
+                        phone = phone.replace('；', ';').replace(' ', '').replace('\\u200b', '')
+                        # 移除末尾分号或多余的非数字字符
+                        phone = phone.rstrip(';').strip()
                     area = float(row[5]) if len(row) > 5 and row[5] else 0.0
                     
                     # 解析入住日期
@@ -81,18 +86,33 @@ class ExcelImporter:
                         errors.append(f"第{row_idx}行：房号或姓名为空")
                         continue
                     
-                    # 创建住户（传入可选 building、unit、identity 和 property_type）
-                    ResidentService.create_resident(
-                        building=building,
-                        unit=unit,
-                        room_no=room_no,
-                        name=name,
-                        phone=phone,
-                        area=area,
-                        move_in_date=move_in_date,
-                        identity=identity,
-                        property_type=property_type
-                    )
+                    # 若以 (building,unit,room_no) 存在则更新；否则创建新的住户
+                    existing = ResidentService.get_resident_by_triplet(building, unit, room_no)
+                    if existing:
+                        ResidentService.update_resident(
+                            existing.id,
+                            building=building,
+                            unit=unit,
+                            room_no=room_no,
+                            name=name,
+                            phone=phone,
+                            area=area,
+                            move_in_date=move_in_date,
+                            identity=identity,
+                            property_type=property_type
+                        )
+                    else:
+                        ResidentService.create_resident(
+                            building=building,
+                            unit=unit,
+                            room_no=room_no,
+                            name=name,
+                            phone=phone,
+                            area=area,
+                            move_in_date=move_in_date,
+                            identity=identity,
+                            property_type=property_type
+                        )
                     success_count += 1
                     
                 except ValueError as e:

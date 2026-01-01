@@ -243,6 +243,9 @@ class ReceiptPrinter:
 
             # 页面尺寸与边距
             margin = int(width * margin_scale)
+            # 最小页边距，避免内容过贴边导致打印被裁切
+            if margin < 20:
+                margin = 20
             content_width = width - 2 * margin
             y = margin
             
@@ -272,14 +275,15 @@ class ReceiptPrinter:
             company_rect = QRect(margin, y, content_width, int(row_height * 1.5))
             painter.drawText(company_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
             y += company_rect.height()
-            # 去除公司抬头下方横线（需求: 删除公司与“收费收据”之间的横线）
-            y += int(row_height * 0.1) if is_wide_paper else int(row_height * 0.3)
+            # 保持公司抬头与标题之间合理间距，避免过度压缩导致下方签名区域被挤出页底
+            y += int(row_height * 0.10) if is_wide_paper else int(row_height * 0.25)
 
             # 收据大标题
             painter.setFont(title_font)
             title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
             painter.drawText(title_rect, Qt.AlignCenter, "收费收据")
-            y += title_rect.height() + (0 if is_wide_paper else int(row_height * 0.5))
+            # 标题与表格之间的间距，保留一定空间以保证整体布局不拥挤
+            y += title_rect.height() + int(row_height * 0.35)
             
             # 收据编号
             painter.setFont(normal_font)
@@ -375,6 +379,21 @@ class ReceiptPrinter:
             note_rows = 1
             total_table_rows = 1 + num_rows + 1 + note_rows
             table_height = total_table_rows * row_height
+
+            # 若表格过高以致签名/底部空间不足，则减少明细行数以保证签名能正常绘制
+            try:
+                sig_est_height = int(row_height * 2.5)  # 预留签名与提示行高度
+                available_space = height - margin - table_top - sig_est_height
+                max_total_rows = max(1, available_space // max(1, row_height))
+                if total_table_rows > max_total_rows:
+                    # 需减少 num_rows
+                    min_fixed_rows = 1 + 1 + note_rows  # header + total + note rows
+                    new_num_rows = max(0, int(max_total_rows - min_fixed_rows))
+                    num_rows = min(num_rows, new_num_rows)
+                    total_table_rows = 1 + num_rows + 1 + note_rows
+                    table_height = total_table_rows * row_height
+            except Exception:
+                pass
 
             # 绘制外框与网格
             pen = QPen(Qt.black)
@@ -509,8 +528,16 @@ class ReceiptPrinter:
             # 底部签名
             sig_height = row_height
             # 改为紧跟内容下方，宽纸模式下尽量紧凑
-            sig_offset = 0 if is_wide_paper else int(row_height * 0.5)
+            sig_offset = 0 if is_wide_paper else int(row_height * 0.3)
             sig_y = y + sig_offset
+            # 如果过低可能会超出页底，做保险检查并向上调整（保留少量额外间距）
+            try:
+                extra_pad = int(row_height * 0.5)
+                bottom_limit = height - margin - sig_height - extra_pad
+                if sig_y > bottom_limit:
+                    sig_y = max(y, bottom_limit)
+            except Exception:
+                pass
             
             left_x = start_x
             right_x = start_x + int(table_width / 2)
@@ -710,14 +737,14 @@ class ReceiptPrinter:
             # 宽纸且空间紧凑时，减少间距
             y += title_rect.height()
             if not is_wide_paper:
-                 y += int(row_height * 0.2)
+                 y += int(row_height * 0.1)
             
             painter.setFont(title_font)
             title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
             painter.drawText(title_rect, Qt.AlignCenter, "收费收据（合并）")
             y += title_rect.height()
             if not is_wide_paper:
-                y += int(row_height * 0.5)
+                y += int(row_height * 0.3)
 
             # 表格
             table_width = int(content_width * table_width_pct)
@@ -857,8 +884,9 @@ class ReceiptPrinter:
                 sig_y = y
             else:
                 # 标准模式：尝试置于底部，但确保不覆盖内容
-                bottom_y = int(page_rect.y() + (page_rect.height()) - margin - 60)
-                sig_y = max(y + 20, bottom_y)
+                extra_pad = int(row_height * 0.3)
+                bottom_y = int(page_rect.y() + (page_rect.height()) - margin - sig_height - extra_pad)
+                sig_y = max(y + 10, bottom_y)
             left_x = int(start_x)
             right_x = int(start_x + table_width - int(table_width / 2))
             painter.drawText(QRect(left_x, int(sig_y), int(table_width / 2), 20), Qt.AlignLeft, "收款人：")

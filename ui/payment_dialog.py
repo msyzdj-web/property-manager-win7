@@ -142,7 +142,7 @@ class PaymentDialog(QDialog):
             residents = ResidentService.get_all_residents(active_only=True)
             self.resident_combo.clear()
             for resident in residents:
-                self.resident_combo.addItem(f"{resident.room_no} - {resident.name}", resident.id)
+                self.resident_combo.addItem(f"{getattr(resident,'full_room_no', resident.room_no)} - {resident.name}", resident.id)
         except Exception as e:
             QMessageBox.critical(self, '错误', f'加载住户列表失败：{str(e)}')
     

@@ -71,7 +71,7 @@ class PayDialog(QDialog):
             
             # 显示账单信息
             remaining_months = payment.billing_months - payment.paid_months
-            info_text = f"住户: {payment.resident.room_no} - {payment.resident.name}\n"
+            info_text = f"住户: {getattr(payment.resident, 'full_room_no', payment.resident.room_no)} - {payment.resident.name}\n"
             info_text += f"收费项目: {payment.charge_item.name}\n"
             info_text += f"计费周期: {payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}\n"
             info_text += f"总周期: {payment.billing_months} 月\n"

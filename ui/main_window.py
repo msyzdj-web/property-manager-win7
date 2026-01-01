@@ -15,6 +15,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from services.resident_service import ResidentService
 from services.charge_service import ChargeService
 from services.payment_service import PaymentService
+from models.database import DB_PATH, SessionLocal
+from models.payment import Payment
+from models.payment_transaction import PaymentTransaction
 from ui.resident_dialog import ResidentDialog
 from ui.charge_dialog import ChargeDialog
 from ui.payment_dialog import PaymentDialog
@@ -443,7 +446,8 @@ class MainWindow(QMainWindow):
                         except Exception:
                             key.append(p)
                     return tuple(key)
-                self.resident_table.setItem(row, 1, SortableItem(resident.room_no, sort_key=_room_key(resident.room_no)))
+                room_display = getattr(resident, 'full_room_no', resident.room_no)
+                self.resident_table.setItem(row, 1, SortableItem(room_display, sort_key=_room_key(room_display)))
                 self.resident_table.setItem(row, 2, QTableWidgetItem(resident.name))
                 self.resident_table.setItem(row, 3, QTableWidgetItem(resident.phone or ''))
                 self.resident_table.setItem(row, 4, QTableWidgetItem(str(float(resident.area) if resident.area else 0.0)))
@@ -482,7 +486,8 @@ class MainWindow(QMainWindow):
                         except Exception:
                             key.append(p)
                     return tuple(key)
-                self.resident_table.setItem(row, 1, SortableItem(resident.room_no, sort_key=_room_key(resident.room_no)))
+                room_display = getattr(resident, 'full_room_no', resident.room_no)
+                self.resident_table.setItem(row, 1, SortableItem(room_display, sort_key=_room_key(room_display)))
                 self.resident_table.setItem(row, 2, QTableWidgetItem(resident.name))
                 self.resident_table.setItem(row, 3, QTableWidgetItem(resident.phone or ''))
                 self.resident_table.setItem(row, 4, QTableWidgetItem(str(float(resident.area) if resident.area else 0.0)))
@@ -523,10 +528,39 @@ class MainWindow(QMainWindow):
             r = idx.row()
             resident_ids.append(int(self.resident_table.item(r, 0).text()))
             room_nos.append(self.resident_table.item(r, 1).text())
+        # 统计将被删除的相关缴费记录数与流水数，提示用户
+        db = SessionLocal()
+        try:
+            payments = db.query(Payment).filter(Payment.resident_id.in_(resident_ids)).all()
+            payment_ids = [p.id for p in payments if p.id is not None]
+            payment_count = len(payment_ids)
+            tx_count = 0
+            if payment_ids:
+                tx_count = db.query(PaymentTransaction).filter(PaymentTransaction.payment_id.in_(payment_ids)).count()
+        finally:
+            db.close()
 
-        reply = QMessageBox.question(self, '确认', f'确定要删除以下住户吗？\n' + "\n".join(room_nos),
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        # 使用自定义的可滚动确认对话框，避免大量项时按钮被遮挡
+        from ui.confirm_delete_dialog import ConfirmDeleteDialog
+        dlg = ConfirmDeleteDialog(self, items=room_nos, title='确认删除住户')
+
+        # 在对话框外再弹一层强确认，显示将删除的记录统计和备份提示
+        if dlg.exec_() == ConfirmDeleteDialog.Accepted:
+            msg = f"将删除 {len(resident_ids)} 个住户，及其关联的 {payment_count} 条缴费记录和 {tx_count} 条流水。\n\n操作前会自动备份数据库，确定继续吗？"
+            reply = QMessageBox.question(self, '最终确认', msg, QMessageBox.Yes | QMessageBox.No)
+            if reply != QMessageBox.Yes:
+                return
+
+            # 备份数据库文件
+            try:
+                import shutil, os, datetime
+                os.makedirs('exports', exist_ok=True)
+                ts = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+                backup_path = os.path.join('exports', f'property_db_backup_{ts}.db')
+                shutil.copy2(DB_PATH, backup_path)
+            except Exception as e:
+                QMessageBox.warning(self, '警告', f'无法创建数据库备份：{e}\n继续删除可能无法恢复。')
+
             failed = []
             for rid in resident_ids:
                 try:
@@ -535,9 +569,9 @@ class MainWindow(QMainWindow):
                     failed.append((rid, str(e)))
 
             if not failed:
-                QMessageBox.information(self, '成功', '已删除选中住户')
+                QMessageBox.information(self, '成功', f'已删除选中住户（并删除其关联缴费与流水）。\n备份：{backup_path if os.path.exists(backup_path) else "未生成"}')
             else:
-                msgs = "\n".join([f"{rid}: {err}" for rid, err in failed])
+                msgs = '\n'.join([f"{rid}: {err}" for rid, err in failed])
                 QMessageBox.warning(self, '部分失败', f'部分住户删除失败：\n{msgs}')
             self.load_residents()
     
@@ -630,7 +664,7 @@ class MainWindow(QMainWindow):
             
             for row, payment in enumerate(payments):
                 self.payment_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
-                self.payment_table.setItem(row, 1, QTableWidgetItem(payment.resident.room_no))
+                self.payment_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
                 # 计费周期
@@ -726,7 +760,7 @@ class MainWindow(QMainWindow):
             
             for row, payment in enumerate(payments):
                 self.payment_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
-                self.payment_table.setItem(row, 1, QTableWidgetItem(payment.resident.room_no))
+                self.payment_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
                 self.payment_table.setItem(row, 4, QTableWidgetItem(payment.period))
@@ -906,7 +940,7 @@ class MainWindow(QMainWindow):
             unpaid_total_remaining = 0.0
             for row, payment in enumerate(filtered):
                 self.unpaid_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
-                self.unpaid_table.setItem(row, 1, QTableWidgetItem(payment.resident.room_no))
+                self.unpaid_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.unpaid_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.unpaid_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
                 self.unpaid_table.setItem(row, 4, QTableWidgetItem(payment.period))

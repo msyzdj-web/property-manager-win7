@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - master
+      - ci/onedir-artifact
 
 jobs:
   build-win7:
