@@ -443,7 +443,8 @@ class MainWindow(QMainWindow):
                         except Exception:
                             key.append(p)
                     return tuple(key)
-                self.resident_table.setItem(row, 1, SortableItem(resident.room_no, sort_key=_room_key(resident.room_no)))
+                room_display = getattr(resident, 'full_room_no', resident.room_no)
+                self.resident_table.setItem(row, 1, SortableItem(room_display, sort_key=_room_key(room_display)))
                 self.resident_table.setItem(row, 2, QTableWidgetItem(resident.name))
                 self.resident_table.setItem(row, 3, QTableWidgetItem(resident.phone or ''))
                 self.resident_table.setItem(row, 4, QTableWidgetItem(str(float(resident.area) if resident.area else 0.0)))
@@ -482,7 +483,8 @@ class MainWindow(QMainWindow):
                         except Exception:
                             key.append(p)
                     return tuple(key)
-                self.resident_table.setItem(row, 1, SortableItem(resident.room_no, sort_key=_room_key(resident.room_no)))
+                room_display = getattr(resident, 'full_room_no', resident.room_no)
+                self.resident_table.setItem(row, 1, SortableItem(room_display, sort_key=_room_key(room_display)))
                 self.resident_table.setItem(row, 2, QTableWidgetItem(resident.name))
                 self.resident_table.setItem(row, 3, QTableWidgetItem(resident.phone or ''))
                 self.resident_table.setItem(row, 4, QTableWidgetItem(str(float(resident.area) if resident.area else 0.0)))
@@ -630,7 +632,7 @@ class MainWindow(QMainWindow):
             
             for row, payment in enumerate(payments):
                 self.payment_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
-                self.payment_table.setItem(row, 1, QTableWidgetItem(payment.resident.room_no))
+                self.payment_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
                 # 计费周期
@@ -726,7 +728,7 @@ class MainWindow(QMainWindow):
             
             for row, payment in enumerate(payments):
                 self.payment_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
-                self.payment_table.setItem(row, 1, QTableWidgetItem(payment.resident.room_no))
+                self.payment_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
                 self.payment_table.setItem(row, 4, QTableWidgetItem(payment.period))
@@ -906,7 +908,7 @@ class MainWindow(QMainWindow):
             unpaid_total_remaining = 0.0
             for row, payment in enumerate(filtered):
                 self.unpaid_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
-                self.unpaid_table.setItem(row, 1, QTableWidgetItem(payment.resident.room_no))
+                self.unpaid_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.unpaid_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.unpaid_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
                 self.unpaid_table.setItem(row, 4, QTableWidgetItem(payment.period))

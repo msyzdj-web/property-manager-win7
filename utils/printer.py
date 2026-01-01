@@ -279,7 +279,8 @@ class ReceiptPrinter:
             painter.setFont(title_font)
             title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
             painter.drawText(title_rect, Qt.AlignCenter, "收费收据")
-            y += title_rect.height() + (0 if is_wide_paper else int(row_height * 0.5))
+            # 增加标题与表格之间的间距，避免在纸张短/压缩时下方签名区域被挤出页底
+            y += title_rect.height() + (0 if is_wide_paper else int(row_height * 0.8))
             
             # 收据编号
             painter.setFont(normal_font)
@@ -375,6 +376,21 @@ class ReceiptPrinter:
             note_rows = 1
             total_table_rows = 1 + num_rows + 1 + note_rows
             table_height = total_table_rows * row_height
+
+            # 若表格过高以致签名/底部空间不足，则减少明细行数以保证签名能正常绘制
+            try:
+                sig_est_height = int(row_height * 2.5)  # 预留签名与提示行高度
+                available_space = height - margin - table_top - sig_est_height
+                max_total_rows = max(1, available_space // max(1, row_height))
+                if total_table_rows > max_total_rows:
+                    # 需减少 num_rows
+                    min_fixed_rows = 1 + 1 + note_rows  # header + total + note rows
+                    new_num_rows = max(0, int(max_total_rows - min_fixed_rows))
+                    num_rows = min(num_rows, new_num_rows)
+                    total_table_rows = 1 + num_rows + 1 + note_rows
+                    table_height = total_table_rows * row_height
+            except Exception:
+                pass
 
             # 绘制外框与网格
             pen = QPen(Qt.black)
