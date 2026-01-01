@@ -185,13 +185,21 @@ class ResidentService:
             resident = db.query(Resident).filter(Resident.id == resident_id).first()
             if not resident:
                 raise ValueError("住户不存在")
-            
-            # 检查是否有缴费记录
+
+            # 级联删除：先删除与该住户相关的所有 payment_transactions 与 payments，再删除住户本身
             from models.payment import Payment
-            payment_count = db.query(Payment).filter(Payment.resident_id == resident_id).count()
-            if payment_count > 0:
-                raise ValueError(f"该住户有 {payment_count} 条缴费记录，无法删除")
-            
+            from models.payment_transaction import PaymentTransaction
+
+            payments = db.query(Payment).filter(Payment.resident_id == resident_id).all()
+            if payments:
+                payment_ids = [p.id for p in payments if p.id is not None]
+                if payment_ids:
+                    # 删除支付流水（transaction）记录
+                    db.query(PaymentTransaction).filter(PaymentTransaction.payment_id.in_(payment_ids)).delete(synchronize_session=False)
+                # 删除 payments
+                db.query(Payment).filter(Payment.resident_id == resident_id).delete(synchronize_session=False)
+
+            # 最后删除住户
             db.delete(resident)
             db.commit()
             return True
