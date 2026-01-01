@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from models.resident import Resident
 from models.database import SessionLocal
+from sqlalchemy import and_
 
 
 class ResidentService:
@@ -45,6 +46,23 @@ class ResidentService:
         finally:
             if db is not None:
                 db.close()
+
+    @staticmethod
+    def get_resident_by_triplet(building: str, unit: str, room_no: str, db: Session = None):
+        """根据 (building, unit, room_no) 三元组获取住户（全部匹配）"""
+        if db is None:
+            db = SessionLocal()
+        try:
+            return db.query(Resident).filter(
+                and_(
+                    Resident.building == (building or ''),
+                    Resident.unit == (unit or ''),
+                    Resident.room_no == room_no
+                )
+            ).first()
+        finally:
+            if db is not None:
+                db.close()
     
     @staticmethod
     def create_resident(building: str = '', unit: str = '', room_no: str = '', name: str = None, phone: str = '', area: float = 0.0, 
@@ -53,10 +71,10 @@ class ResidentService:
         if db is None:
             db = SessionLocal()
         try:
-            # 检查房号是否已存在
-            existing = ResidentService.get_resident_by_room_no(room_no, db)
+            # 检查 (楼栋, 单元, 房号) 是否已存在
+            existing = ResidentService.get_resident_by_triplet(building, unit, room_no, db)
             if existing:
-                raise ValueError(f"房号 {room_no} 已存在")
+                raise ValueError(f"房号 {room_no} 在 {building}-{unit} 已存在")
             
             resident = Resident(
                 building=building,
@@ -96,12 +114,17 @@ class ResidentService:
             if not resident:
                 raise ValueError("住户不存在")
             
-            # 如果修改房号，检查是否重复
-            if room_no and room_no != resident.room_no:
-                existing = ResidentService.get_resident_by_room_no(room_no, db)
+            # 如果修改楼栋/单元/房号中的任意一项，检查三元组唯一性
+            new_building = building if building is not None else resident.building
+            new_unit = unit if unit is not None else resident.unit
+            new_room_no = room_no if room_no is not None else resident.room_no
+            if (new_building, new_unit, new_room_no) != (resident.building, resident.unit, resident.room_no):
+                existing = ResidentService.get_resident_by_triplet(new_building, new_unit, new_room_no, db)
                 if existing and existing.id != resident_id:
-                    raise ValueError(f"房号 {room_no} 已存在")
-                resident.room_no = room_no
+                    raise ValueError(f"房号 {new_room_no} 在 {new_building}-{new_unit} 已存在")
+                resident.room_no = new_room_no
+                resident.building = new_building
+                resident.unit = new_unit
             
             if building is not None:
                 resident.building = building
