@@ -90,7 +90,8 @@ class ResidentService:
             )
             db.add(resident)
             db.commit()
-            db.refresh(resident)
+            # refresh by re-querying to avoid session persistence issues
+            resident = db.query(Resident).filter(Resident.id == resident_id).first()
             return resident
         except IntegrityError:
             db.rollback()
