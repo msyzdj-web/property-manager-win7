@@ -243,6 +243,9 @@ class ReceiptPrinter:
 
             # 页面尺寸与边距
             margin = int(width * margin_scale)
+            # 最小页边距，避免内容过贴边导致打印被裁切
+            if margin < 20:
+                margin = 20
             content_width = width - 2 * margin
             y = margin
             
@@ -272,15 +275,15 @@ class ReceiptPrinter:
             company_rect = QRect(margin, y, content_width, int(row_height * 1.5))
             painter.drawText(company_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
             y += company_rect.height()
-            # 缩小公司抬头与标题之间的间距以节省页面高度
-            y += int(row_height * 0.05) if is_wide_paper else int(row_height * 0.15)
+            # 保持公司抬头与标题之间合理间距，避免过度压缩导致下方签名区域被挤出页底
+            y += int(row_height * 0.10) if is_wide_paper else int(row_height * 0.25)
 
             # 收据大标题
             painter.setFont(title_font)
             title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
             painter.drawText(title_rect, Qt.AlignCenter, "收费收据")
-            # 标题与表格之间的间距，保持较小值以避免压缩时签名被挤出页底
-            y += title_rect.height() + (0 if is_wide_paper else int(row_height * 0.3))
+            # 标题与表格之间的间距，保留一定空间以保证整体布局不拥挤
+            y += title_rect.height() + int(row_height * 0.35)
             
             # 收据编号
             painter.setFont(normal_font)
@@ -529,9 +532,10 @@ class ReceiptPrinter:
             sig_y = y + sig_offset
             # 如果过低可能会超出页底，做保险检查并向上调整（保留少量额外间距）
             try:
-                extra_pad = int(row_height * 0.3)
-                if sig_y + sig_height > height - margin - extra_pad:
-                    sig_y = max(y, height - margin - sig_height - extra_pad)
+                extra_pad = int(row_height * 0.5)
+                bottom_limit = height - margin - sig_height - extra_pad
+                if sig_y > bottom_limit:
+                    sig_y = max(y, bottom_limit)
             except Exception:
                 pass
             
