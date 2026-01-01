@@ -525,10 +525,10 @@ class MainWindow(QMainWindow):
             r = idx.row()
             resident_ids.append(int(self.resident_table.item(r, 0).text()))
             room_nos.append(self.resident_table.item(r, 1).text())
-
-        reply = QMessageBox.question(self, '确认', f'确定要删除以下住户吗？\n' + "\n".join(room_nos),
-                                     QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        # 使用自定义的可滚动确认对话框，避免大量项时按钮被遮挡
+        from ui.confirm_delete_dialog import ConfirmDeleteDialog
+        dlg = ConfirmDeleteDialog(self, items=room_nos, title='确认删除住户')
+        if dlg.exec_() == ConfirmDeleteDialog.Accepted:
             failed = []
             for rid in resident_ids:
                 try:
