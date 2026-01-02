@@ -44,8 +44,8 @@ class ReceiptDialog(QDialog):
         paper_layout = QHBoxLayout()
         paper_layout.addWidget(QLabel('纸张尺寸：'))
         self.paper_size_combo = QComboBox()
-        self.paper_size_combo.addItems(['A4', '收据纸 (241×93mm)', '收据纸 (80×200mm)'])
-        self.paper_size_combo.setCurrentText('A4')
+        self.paper_size_combo.addItems(['收据纸 (241×93mm)'])
+        self.paper_size_combo.setCurrentText('收据纸 (241×93mm)')
         self.paper_size_combo.currentTextChanged.connect(lambda x: self.load_receipt())
         paper_layout.addWidget(self.paper_size_combo)
         # 顶部偏移微调（mm）
@@ -254,13 +254,34 @@ class ReceiptDialog(QDialog):
             paid_period = ""
             paid_amount_display = ""
 
-        # 获取纸张设置以调整预览样式
+        # 获取纸张设置以调整预览样式（确保预览长宽比与导出图片一致）
         curr_paper = self.paper_size_combo.currentText()
         is_wide = "241" in curr_paper
         is_narrow = "80" in curr_paper
-        
-        # 默认样式参数 (A4)
-        paper_width = "500px"
+
+        # 计算目标纸张物理尺寸（mm）
+        if curr_paper == '收据纸 (241×93mm)':
+            target_w_mm, target_h_mm = 241.0, 93.0
+        elif curr_paper == '收据纸 (80×200mm)':
+            target_w_mm, target_h_mm = 80.0, 200.0
+        else:
+            target_w_mm, target_h_mm = 210.0, 297.0
+
+        # 预览宽度使用预览控件当前可用宽度，保证显示比例与导出图片一致
+        try:
+            preview_widget_width = max(300, self.receipt_preview.viewport().width() - 20)
+        except Exception:
+            preview_widget_width = 500
+        # 计算高度以匹配纸张的长宽比
+        try:
+            preview_height = int(preview_widget_width * (target_h_mm / target_w_mm))
+        except Exception:
+            preview_height = int(preview_widget_width * (93.0 / 241.0)) if is_wide else int(preview_widget_width * (297.0 / 210.0))
+
+        paper_width = f"{preview_widget_width}px"
+        paper_height = f"{preview_height}px"
+
+        # 基础样式值（可随纸张类型调整）
         padding = "30px 40px"
         empty_rows_count = 6
         base_font_size = "14px"
@@ -268,20 +289,17 @@ class ReceiptDialog(QDialog):
         company_size = "22px"
         cell_padding = "8px"
         margin_bottom_divider = "12px"
-        
+
         if is_wide:
             # 宽纸 241x93mm 专属紧凑样式
-            # 比例约为 2.6:1。如果宽 750px，高应约为 290px。包含内容后应自然撑开到此高度。
-            paper_width = "850px" # 增加更多宽度以利用屏幕
-            padding = "15px 20px" # 极小的内边距
-            empty_rows_count = 0  # 无空行
-            base_font_size = "12px" # 更小的基准字体
+            padding = "15px 20px"
+            empty_rows_count = 0
+            base_font_size = "12px"
             title_size = "16px"
             company_size = "18px"
-            cell_padding = "4px" # 表格更紧凑
+            cell_padding = "4px"
             margin_bottom_divider = "5px"
         elif is_narrow:
-            paper_width = "260px"
             padding = "10px 5px"
             empty_rows_count = 2
             base_font_size = "12px"
@@ -352,7 +370,7 @@ th {{ background:#f5f5f5; font-weight:600; }}
 </style>
 </head>
 <body>
-<div class="receipt-paper">
+  <div class="receipt-paper" style="width:{paper_width}; height:{paper_height};">
   <div class="company">{logo_html}四川盛涵物业服务有限公司</div>
   <div class="title">收费收据</div>
   <div class="receipt-no">NO:{payment_date_str}{payment_seq:03d}</div>

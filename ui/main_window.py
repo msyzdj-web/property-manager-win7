@@ -818,8 +818,7 @@ class MainWindow(QMainWindow):
             hbox_ctrl = QHBoxLayout()
             hbox_ctrl.addWidget(QLabel("纸张尺寸:"))
             combo_size = QComboBox()
-            combo_size.addItems(['收据纸 (241×93mm)', 'A4', '收据纸 (80×200mm)'])
-            # 默认设置为宽纸，符合用户偏好
+            combo_size.addItems(['收据纸 (241×93mm)'])
             combo_size.setCurrentText('收据纸 (241×93mm)')
             hbox_ctrl.addWidget(combo_size)
             # 顶部偏移微调（mm）

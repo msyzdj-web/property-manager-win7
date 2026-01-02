@@ -16,11 +16,9 @@ from decimal import Decimal, ROUND_HALF_UP
 class ReceiptPrinter:
     """收据打印类"""
     
-    # 预定义纸张尺寸 (毫米)
+    # 仅保留目标收据纸尺寸 (毫米)
     PAPER_SIZES = {
-        'A4': (210, 297),
         '收据纸 (241×93mm)': (241, 93),
-        '收据纸 (80×200mm)': (80, 200),
     }
     
     def __init__(self, paper_size='A4', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0, safe_margin_mm: float = 5.0):
@@ -47,12 +45,16 @@ class ReceiptPrinter:
             self._created_qapp = False
         self.printer = QPrinter(QPrinter.HighResolution)
         
+        # 仅支持收据纸 (241×93mm)
         if paper_size in self.PAPER_SIZES:
             w_mm, h_mm = self.PAPER_SIZES[paper_size]
             from PyQt5.QtCore import QSizeF
             self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
         else:
-            self.printer.setPageSize(QPrinter.A4)
+            # 若传入非预定义值，强制使用收据纸尺寸
+            w_mm, h_mm = self.PAPER_SIZES['收据纸 (241×93mm)']
+            from PyQt5.QtCore import QSizeF
+            self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
         
         # 根据纸张方向设置
         # 所有纸张尺寸均已定义了准确的 W, H。对于自定义尺寸，使用 Portrait 模式通常能最准确地对应 (W, H)。
@@ -723,10 +725,11 @@ class ReceiptPrinter:
             from PIL import Image, ImageDraw, ImageFont
             # 简易布局：以像素为单位，按 dpi 计算尺寸
             mm_per_inch = 25.4
+            # 仅支持收据纸 (241×93mm)
             if self.paper_size in self.PAPER_SIZES:
                 w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
             else:
-                w_mm, h_mm = 210.0, 297.0
+                w_mm, h_mm = self.PAPER_SIZES['收据纸 (241×93mm)']
             width_px = int(w_mm / mm_per_inch * dpi)
             height_px = int(h_mm / mm_per_inch * dpi)
             img = Image.new('RGB', (width_px, height_px), 'white')
