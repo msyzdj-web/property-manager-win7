@@ -21,7 +21,7 @@ class ReceiptPrinter:
         '收据纸 (241×93mm)': (241, 93),
     }
     
-    def __init__(self, paper_size='A4', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0, safe_margin_mm: float = 5.0):
+    def __init__(self, paper_size='A4', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0, safe_margin_mm: float = 8.0):
         """
         top_offset_mm: 页面内容向上平移的毫米数（用于针式打印机微调）
         company_font_scale_adj: 公司标题与主标题的字体缩放系数（<1 缩小, >1 放大）
