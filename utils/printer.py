@@ -49,15 +49,19 @@ class ReceiptPrinter:
         self.printer = QPrinter(QPrinter.HighResolution)
         
         # 仅支持收据纸 (241×93mm)
+        # NOTE:
+        # 不在此处强制设置 QPrinter 的自定义纸张尺寸，因为在 macOS 上
+        # 在显示打印对话框之前改变打印机的纸张可能触发系统错误提示：
+        # "Changing the destination paper to Custom would cause a conflict that cannot be resolved."
+        # 因此我们只在需要输出为 PDF 时再为 QPrinter 设置页面尺寸，避免在物理打印前修改打印机状态。
         if paper_size in self.PAPER_SIZES:
             w_mm, h_mm = self.PAPER_SIZES[paper_size]
-            from PyQt5.QtCore import QSizeF
-            self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
         else:
             # 若传入非预定义值，强制使用收据纸尺寸
             w_mm, h_mm = self.PAPER_SIZES['收据纸 (241×93mm)']
-            from PyQt5.QtCore import QSizeF
-            self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
+        # 保存目标物理尺寸供渲染/导出使用；不要在此处调用 self.printer.setPageSizeMM(...)
+        self._target_w_mm = float(w_mm)
+        self._target_h_mm = float(h_mm)
         
         # 根据纸张方向设置
         # 所有纸张尺寸均已定义了准确的 W, H。对于自定义尺寸，使用 Portrait 模式通常能最准确地对应 (W, H)。
