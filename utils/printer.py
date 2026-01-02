@@ -149,47 +149,94 @@ class ReceiptPrinter:
                         pass
                     self.printer.setOutputFileName(output_file)
             else:
-                # 显示打印对话框
+                # 显示打印对话框（不在此处修改纸张尺寸以避免 macOS 的 Custom 纸张冲突提示）
                 print_dialog = QPrintDialog(self.printer)
                 if print_dialog.exec_() != QPrintDialog.Accepted:
                     return False
-            
-            # 开始打印：如果之前未为 PDF 创建流水，则现在创建（适用于直接打印）
-            try:
-                if 'payment_seq' not in locals() or payment_seq is None:
-                    from services.print_service import PrintService
-                    print_log = PrintService.create_print_log(payment_id=payment.id)
-                    payment_date_str = payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d')
-                    payment_seq = print_log.seq
-            except Exception:
-                payment_date_str = payment_date_str if 'payment_date_str' in locals() else (payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d'))
-                payment_seq = payment_seq if 'payment_seq' in locals() else None
 
-            # 在打印到物理设备前，按当前打印机分辨率计算像素偏移
-            try:
-                dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else 300
-            except Exception:
-                dpi = 300
-            try:
-                mm_per_inch = 25.4
-                self._top_offset_px = int(self.top_offset_mm / mm_per_inch * dpi)
-                # 左右安全边距像素化
-                left_mm = self.safe_margin_left_mm if self.safe_margin_left_mm is not None else self.safe_margin_mm
-                right_mm = self.safe_margin_right_mm if self.safe_margin_right_mm is not None else self.safe_margin_mm
-                self._safe_margin_left_px = int(left_mm / mm_per_inch * dpi) if left_mm is not None else 0
-                self._safe_margin_right_px = int(right_mm / mm_per_inch * dpi) if right_mm is not None else 0
-            except Exception:
-                self._top_offset_px = 0
-                self._safe_margin_left_px = 0
-                self._safe_margin_right_px = 0
+                # 开始打印：如果之前未为 PDF 创建流水，则现在创建（适用于直接打印）
+                try:
+                    if 'payment_seq' not in locals() or payment_seq is None:
+                        from services.print_service import PrintService
+                        print_log = PrintService.create_print_log(payment_id=payment.id)
+                        payment_date_str = payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d')
+                        payment_seq = print_log.seq
+                except Exception:
+                    payment_date_str = payment_date_str if 'payment_date_str' in locals() else (payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d'))
+                    payment_seq = payment_seq if 'payment_seq' in locals() else None
 
-            # 开始绘制到打印机
-            painter = QPainter()
-            painter.begin(self.printer)
-            page_rect = self.printer.pageRect()
-            self._draw_receipt(painter, page_rect, payment, payment_date_str=payment_date_str, payment_seq=payment_seq)
-            painter.end()
-            return True
+                # 渲染一张与物理打印机分辨率相匹配的图片，然后按目标物理宽度（mm）缩放绘制到打印机页面上。
+                # 这样可以避免直接修改打印机的纸张尺寸，同时保证图像在物理上的实际宽度为目标宽度（例如 241mm）。
+                try:
+                    dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else 300
+                except Exception:
+                    dpi = 300
+
+                # 先渲染到临时 PNG（使用打印机 DPI，以便像素与物理尺寸一一对应）
+                tmp_dir = tempfile.gettempdir()
+                tmp_png = os.path.join(tmp_dir, f"receipt_tmp_{payment_id}.png")
+                ok_img = self.render_receipt_to_image(payment_id, tmp_png, dpi=dpi, payment_date_str=payment_date_str, payment_seq=payment_seq)
+                if not ok_img or not os.path.exists(tmp_png):
+                    # 回退：尝试直接使用向量绘制（旧行为）
+                    try:
+                        # 计算并设置顶部偏移与安全边距（像素），以便 _draw_receipt 使用
+                        mm_per_inch = 25.4
+                        self._top_offset_px = int(self.top_offset_mm / mm_per_inch * dpi)
+                        left_mm = self.safe_margin_left_mm if self.safe_margin_left_mm is not None else self.safe_margin_mm
+                        right_mm = self.safe_margin_right_mm if self.safe_margin_right_mm is not None else self.safe_margin_mm
+                        self._safe_margin_left_px = int(left_mm / mm_per_inch * dpi) if left_mm is not None else 0
+                        self._safe_margin_right_px = int(right_mm / mm_per_inch * dpi) if right_mm is not None else 0
+                    except Exception:
+                        self._top_offset_px = 0
+                        self._safe_margin_left_px = 0
+                        self._safe_margin_right_px = 0
+                    painter = QPainter()
+                    painter.begin(self.printer)
+                    page_rect = self.printer.pageRect()
+                    self._draw_receipt(painter, page_rect, payment, payment_date_str=payment_date_str, payment_seq=payment_seq)
+                    painter.end()
+                    return True
+
+                # 使用图片绘制到打印机页面（按目标物理宽度缩放并水平居中）
+                painter = QPainter()
+                if not painter.begin(self.printer):
+                    try:
+                        if os.path.exists(tmp_png):
+                            os.remove(tmp_png)
+                    except Exception:
+                        pass
+                    return False
+                try:
+                    image = QImage(tmp_png)
+                    # 计算期望的像素宽高（以打印机 DPI 为基准）
+                    mm_per_inch = 25.4
+                    desired_w_px = int(self._target_w_mm / mm_per_inch * dpi)
+                    desired_h_px = int(self._target_h_mm / mm_per_inch * dpi)
+
+                    # 缩放图片以匹配目标物理宽度（保留纵横比）
+                    from PyQt5.QtCore import QSize
+                    target_size = image.size().scaled(QSize(desired_w_px, desired_h_px), Qt.KeepAspectRatio)
+
+                    # 获取打印机页面可绘制区域并计算居中位置
+                    page_rect = self.printer.pageRect()
+                    x = int(page_rect.x() + (page_rect.width() - target_size.width()) // 2)
+                    # 将 top offset 作为向上微调（在 render 时已应用，但在物理页上仍允许少量偏移）
+                    try:
+                        top_px = int(self._top_offset_px)
+                    except Exception:
+                        top_px = 0
+                    y = int(page_rect.y() + max(0, top_px))
+
+                    target_rect = QRect(x, y, int(target_size.width()), int(target_size.height()))
+                    painter.drawImage(target_rect, image)
+                finally:
+                    painter.end()
+                    try:
+                        if os.path.exists(tmp_png):
+                            os.remove(tmp_png)
+                    except Exception:
+                        pass
+                return True
 
         except Exception as e:
             print(f"打印失败: {str(e)}")
