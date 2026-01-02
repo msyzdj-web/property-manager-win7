@@ -2,9 +2,9 @@
 收据打印对话框
 """
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QTextEdit, QMessageBox, QComboBox)
+                             QPushButton, QTextEdit, QMessageBox, QComboBox, QDoubleSpinBox)
 from PyQt5.QtCore import Qt
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 from services.payment_service import PaymentService
@@ -47,6 +47,22 @@ class ReceiptDialog(QDialog):
         self.paper_size_combo.setCurrentText('A4')
         self.paper_size_combo.currentTextChanged.connect(lambda x: self.load_receipt())
         paper_layout.addWidget(self.paper_size_combo)
+        # 顶部偏移微调（mm）
+        paper_layout.addWidget(QLabel(' 上移(mm):'))
+        self.top_offset_spin = QDoubleSpinBox()
+        self.top_offset_spin.setRange(-10.0, 20.0)
+        self.top_offset_spin.setSingleStep(0.5)
+        self.top_offset_spin.setValue(3.0)  # 安全默认，针式打印常用向上偏移
+        self.top_offset_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.top_offset_spin)
+        # 公司标题缩放系数
+        paper_layout.addWidget(QLabel(' 标题缩放:'))
+        self.company_scale_spin = QDoubleSpinBox()
+        self.company_scale_spin.setRange(0.6, 1.2)
+        self.company_scale_spin.setSingleStep(0.01)
+        self.company_scale_spin.setValue(0.95)
+        self.company_scale_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.company_scale_spin)
         paper_layout.addStretch()
         layout.addLayout(paper_layout)
         
@@ -137,7 +153,11 @@ class ReceiptDialog(QDialog):
         # 计费起止展示
         billing_period = ""
         if payment.billing_start_date and payment.billing_end_date:
-            billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
+            try:
+                end_display = payment.billing_end_date - timedelta(days=1)
+            except Exception:
+                end_display = payment.billing_end_date
+            billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
         # 使用最近一笔流水（如果存在）来显示“本次实收”周期与金额；否则回退到累计显示
         paid_period = ""
         paid_amount_display = ""
@@ -166,7 +186,11 @@ class ReceiptDialog(QDialog):
                 prev_paid = max(0, total_paid - months_in_tx)
                 start_tx = add_months(payment.billing_start_date, prev_paid)
                 end_tx = add_months(start_tx, months_in_tx)
-                paid_period = f"{start_tx.strftime('%Y.%m.%d')}–{end_tx.strftime('%Y.%m.%d')}"
+                try:
+                    end_tx_display = end_tx - timedelta(days=1)
+                except Exception:
+                    end_tx_display = end_tx
+                paid_period = f"{start_tx.strftime('%Y.%m.%d')}–{end_tx_display.strftime('%Y.%m.%d')}"
                 paid_amount_display = self._fmt_amount_two_decimals(last_tx.amount)
             else:
                 # 无流水则退回到累计已缴金额显示
@@ -180,7 +204,11 @@ class ReceiptDialog(QDialog):
                         return dt.replace(year=year, month=month, day=day)
                     start = payment.billing_start_date
                     end_paid = add_months(start, int(payment.paid_months))
-                    paid_period = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
+                    try:
+                        end_paid_display = end_paid - timedelta(days=1)
+                    except Exception:
+                        end_paid_display = end_paid
+                    paid_period = f"{start.strftime('%Y.%m.%d')}–{end_paid_display.strftime('%Y.%m.%d')}"
                     paid_amount_display = self._fmt_amount_two_decimals(payment.paid_amount) if payment.paid_amount else ""
         except Exception:
             paid_period = ""
@@ -359,7 +387,9 @@ th {{ background:#f5f5f5; font-weight:600; }}
         """打印收据"""
         try:
             paper_size = self.paper_size_combo.currentText()
-            printer = ReceiptPrinter(paper_size=paper_size)
+            top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+            comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
             if printer.print_receipt(self.payment_id):
                 QMessageBox.information(self, '成功', '打印成功')
             else:
@@ -393,7 +423,9 @@ th {{ background:#f5f5f5; font-weight:600; }}
                 path = path + '.pdf'
 
             paper_size = self.paper_size_combo.currentText()
-            printer = ReceiptPrinter(paper_size=paper_size)
+            top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+            comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
             success = printer.print_receipt(self.payment_id, output_file=path)
             if success:
                 QMessageBox.information(self, '成功', f'已保存 PDF：{path}')
@@ -469,7 +501,11 @@ th {{ background:#f5f5f5; font-weight:600; }}
             # 明细行
             billing_period = ""
             if payment.billing_start_date and payment.billing_end_date:
-                billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
+                try:
+                    end_display = payment.billing_end_date - timedelta(days=1)
+                except Exception:
+                    end_display = payment.billing_end_date
+                billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
             detail_row = start_row + 1
             ws.cell(row=detail_row, column=1, value=payment.charge_item.name if payment.charge_item else "")
             ws.cell(row=detail_row, column=2, value=billing_period)
@@ -559,7 +595,9 @@ th {{ background:#f5f5f5; font-weight:600; }}
                 path = path + '.png'
 
             paper_size = self.paper_size_combo.currentText()
-            printer = ReceiptPrinter(paper_size=paper_size)
+            top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+            comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
             ok = printer.render_receipt_to_image(self.payment_id, path, dpi=300)
             if ok:
                 QMessageBox.information(self, '成功', f'已保存图片：{path}')

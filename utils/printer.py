@@ -23,8 +23,26 @@ class ReceiptPrinter:
         '收据纸 (80×200mm)': (80, 200),
     }
     
-    def __init__(self, paper_size='A4'):
+    def __init__(self, paper_size='A4', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0):
+        """
+        top_offset_mm: 页面内容向上平移的毫米数（用于针式打印机微调）
+        company_font_scale_adj: 公司标题与主标题的字体缩放系数（<1 缩小, >1 放大）
+        """
         self.paper_size = paper_size
+        # 调整项
+        self.top_offset_mm = float(top_offset_mm)
+        self.company_font_scale_adj = float(company_font_scale_adj)
+        # 在 render/print 时会计算为像素值并赋给此属性
+        self._top_offset_px = 0
+        # 确保在创建 QPrinter 前存在 QApplication，避免 headless 调用时崩溃（render/print 调用会在 GUI 环境下已有 QApplication）
+        self._created_qapp = False
+        try:
+            if QApplication.instance() is None:
+                _app = QApplication([])  # 临时创建 Qt 应用以支持 QPrinter/QPainter
+                self._created_qapp = True
+        except Exception:
+            # 如果创建失败则继续，后续渲染可能仍失败但不应阻塞初始化
+            self._created_qapp = False
         self.printer = QPrinter(QPrinter.HighResolution)
         
         if paper_size in self.PAPER_SIZES:
@@ -136,6 +154,17 @@ class ReceiptPrinter:
                 payment_date_str = payment_date_str if 'payment_date_str' in locals() else (payment.created_at.strftime('%Y%m%d') if getattr(payment, 'created_at', None) else datetime.now().strftime('%Y%m%d'))
                 payment_seq = payment_seq if 'payment_seq' in locals() else None
 
+            # 在打印到物理设备前，按当前打印机分辨率计算像素偏移
+            try:
+                dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else 300
+            except Exception:
+                dpi = 300
+            try:
+                mm_per_inch = 25.4
+                self._top_offset_px = int(self.top_offset_mm / mm_per_inch * dpi)
+            except Exception:
+                self._top_offset_px = 0
+
             # 开始绘制到打印机
             painter = QPainter()
             painter.begin(self.printer)
@@ -234,9 +263,10 @@ class ReceiptPrinter:
                     f.setBold(True)
                 return f
 
-            # 字体定义
-            company_font = get_font(1.8, True)   # 标题大字
-            title_font = get_font(1.6, True)     # 收据字样
+            # 字体定义（公司标题与主标题可通过 self.company_font_scale_adj 缩放）
+            comp_scale = (self.company_font_scale_adj if hasattr(self, 'company_font_scale_adj') else 1.0)
+            company_font = get_font(1.8 * comp_scale, True)   # 标题大字
+            title_font = get_font(1.6 * comp_scale, True)     # 收据字样
             normal_font = get_font(1.0)          # 正文
             small_font = get_font(0.9)           # 小字
             bold_font = get_font(1.0, True)      # 正文粗体
@@ -247,7 +277,11 @@ class ReceiptPrinter:
             if margin < 30:
                 margin = 30
             content_width = width - 2 * margin
-            y = margin
+            # 应用顶部像素偏移（render/print 路径会提前将 self.top_offset_mm 转换为 self._top_offset_px）
+            try:
+                y = max(0, margin - int(getattr(self, '_top_offset_px', 0)))
+            except Exception:
+                y = margin
             
             # 行高计算
             if is_wide_paper:
@@ -621,17 +655,124 @@ class ReceiptPrinter:
             image = QImage(width_px, height_px, QImage.Format_ARGB32)
             image.fill(Qt.white)
             painter = QPainter()
+            # 在渲染为图像时，按指定 dpi 将 top_offset_mm 转为像素用于 _draw_receipt
+            try:
+                self._top_offset_px = int(self.top_offset_mm / mm_per_inch * dpi)
+            except Exception:
+                self._top_offset_px = 0
+            # 确保已存在 QApplication（QPrinter/QPainter 需要 Qt 应用环境）
+            created_app = False
+            try:
+                if QApplication.instance() is None:
+                    _app = QApplication([])
+                    created_app = True
+            except Exception:
+                created_app = False
             painter.begin(image)
-            
+
             # 使用与打印器相同的 page_rect（像素坐标）
             page_rect = QRect(0, 0, width_px, height_px)
-            self._draw_receipt(painter, page_rect, payment, payment_date_str=payment_date_str, payment_seq=payment_seq)
-            painter.end()
-            # 保存图像（PNG）
-            ok = image.save(output_path)
-            return ok
+            try:
+                self._draw_receipt(painter, page_rect, payment, payment_date_str=payment_date_str, payment_seq=payment_seq)
+                painter.end()
+                # 保存图像（PNG）
+                ok = image.save(output_path)
+                # 如果我们临时创建了 QApplication，则退出它以释放资源（不影响主程序若已存在）
+                try:
+                    if created_app:
+                        try:
+                            _app.quit()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                return ok
+            except Exception as e:
+                # Qt 渲染失败，尝试使用 PIL 回退生成可视化样张
+                try:
+                    try:
+                        painter.end()
+                    except Exception:
+                        pass
+                    return self._render_receipt_to_image_pil(payment, output_path, dpi=dpi, payment_date_str=payment_date_str, payment_seq=payment_seq)
+                except Exception as e2:
+                    print(f"render_receipt_to_image Qt 渲染失败: {e}, 回退 PIL 也失败: {e2}")
+                    return False
         except Exception as e:
             print(f"render_receipt_to_image 失败: {e}")
+            return False
+
+    def _render_receipt_to_image_pil(self, payment, output_path, dpi=300, payment_date_str: str = None, payment_seq: int = None):
+        """回退：使用 Pillow 生成简单的收据预览（在无法使用 Qt 绘制时使用）"""
+        try:
+            from PIL import Image, ImageDraw, ImageFont
+            # 简易布局：以像素为单位，按 dpi 计算尺寸
+            mm_per_inch = 25.4
+            if self.paper_size in self.PAPER_SIZES:
+                w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+            else:
+                w_mm, h_mm = 210.0, 297.0
+            width_px = int(w_mm / mm_per_inch * dpi)
+            height_px = int(h_mm / mm_per_inch * dpi)
+            img = Image.new('RGB', (width_px, height_px), 'white')
+            draw = ImageDraw.Draw(img)
+
+            # 字体尝试加载常见字体，否则使用默认
+            try:
+                font_big = ImageFont.truetype('SimSun.ttf', max(18, int(width_px * 0.03)))
+                font_title = ImageFont.truetype('SimSun.ttf', max(16, int(width_px * 0.025)))
+                font_norm = ImageFont.truetype('SimSun.ttf', max(12, int(width_px * 0.015)))
+            except Exception:
+                try:
+                    font_big = ImageFont.truetype('Arial.ttf', max(18, int(width_px * 0.03)))
+                    font_title = ImageFont.truetype('Arial.ttf', max(16, int(width_px * 0.025)))
+                    font_norm = ImageFont.truetype('Arial.ttf', max(12, int(width_px * 0.015)))
+                except Exception:
+                    font_big = ImageFont.load_default()
+                    font_title = ImageFont.load_default()
+                    font_norm = ImageFont.load_default()
+
+            # 文本内容准备（与 Qt 绘制保持一致的格式化）
+            try:
+                room_display = getattr(payment.resident, 'full_room_no', getattr(payment.resident, 'room_no', ''))
+            except Exception:
+                room_display = ''
+            try:
+                now = datetime.now()
+            except Exception:
+                now = None
+            try:
+                end_display = (payment.billing_end_date - timedelta(days=1)) if getattr(payment, 'billing_end_date', None) else None
+            except Exception:
+                end_display = getattr(payment, 'billing_end_date', None)
+            if getattr(payment, 'billing_start_date', None) and end_display:
+                billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')} - {end_display.strftime('%Y.%m.%d')}"
+            else:
+                billing_period = ''
+            receipt_no = f"NO:{(payment.created_at.strftime('%Y%m%d') if getattr(payment,'created_at',None) else (now.strftime('%Y%m%d') if now else ''))}{int(payment_seq or 1):03d}"
+
+            # 绘制 header / title
+            w_center = width_px // 2
+            draw.text((w_center, int(height_px * 0.03)), "四川盛涵物业服务有限公司", fill='black', font=font_big, anchor='ms')
+            draw.text((w_center, int(height_px * 0.08)), "收费收据", fill='black', font=font_title, anchor='ms')
+            # 右上：票据号与日期
+            if now:
+                draw.text((width_px - 20, int(height_px * 0.03)), now.strftime('%Y年%m月%d日 %H:%M:%S'), fill='black', font=font_norm, anchor='rs')
+            draw.text((width_px - 20, int(height_px * 0.07)), receipt_no, fill='black', font=font_norm, anchor='rs')
+
+            # 基本信息
+            draw.text((40, int(height_px * 0.15)), f"户名: {getattr(payment.resident,'name', '')}    房号: {room_display}", fill='black', font=font_norm)
+            draw.text((40, int(height_px * 0.20)), f"实收周期: {billing_period}", fill='black', font=font_norm)
+            draw.text((40, int(height_px * 0.25)), f"实收金额: {getattr(payment, 'paid_amount', getattr(payment, 'amount', ''))}", fill='black', font=font_norm)
+
+            # 底部签名位置
+            draw.text((40, int(height_px * 0.85)), "收款人:", fill='black', font=font_norm)
+            draw.text((width_px // 2 + 40, int(height_px * 0.85)), "收款单位盖章:", fill='black', font=font_norm)
+
+            img.save(output_path)
+            return True
+        except Exception as e:
+            print(f"_render_receipt_to_image_pil 失败: {e}")
             return False
 
     def print_merged_receipt(self, payment_ids, output_file: str = None):

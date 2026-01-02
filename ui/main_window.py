@@ -4,7 +4,7 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QTabWidget, QTableWidget, QTableWidgetItem, QPushButton,
                              QLabel, QComboBox, QMessageBox, QLineEdit, QMenuBar, QMenu,
-                             QDialog, QFileDialog)
+                             QDialog, QFileDialog, QDoubleSpinBox)
 from PyQt5.QtWidgets import QInputDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap
@@ -822,6 +822,20 @@ class MainWindow(QMainWindow):
             # 默认设置为宽纸，符合用户偏好
             combo_size.setCurrentText('收据纸 (241×93mm)')
             hbox_ctrl.addWidget(combo_size)
+            # 顶部偏移微调（mm）
+            hbox_ctrl.addWidget(QLabel(" 上移(mm):"))
+            combo_top_offset = QDoubleSpinBox()
+            combo_top_offset.setRange(-10.0, 20.0)
+            combo_top_offset.setSingleStep(0.5)
+            combo_top_offset.setValue(3.0)
+            hbox_ctrl.addWidget(combo_top_offset)
+            # 标题缩放系数
+            hbox_ctrl.addWidget(QLabel(" 标题缩放:"))
+            combo_comp_scale = QDoubleSpinBox()
+            combo_comp_scale.setRange(0.6, 1.2)
+            combo_comp_scale.setSingleStep(0.01)
+            combo_comp_scale.setValue(0.95)
+            hbox_ctrl.addWidget(combo_comp_scale)
             hbox_ctrl.addStretch()
             vbox.addLayout(hbox_ctrl)
             
@@ -847,7 +861,9 @@ class MainWindow(QMainWindow):
 
             def refresh_preview():
                 size = combo_size.currentText()
-                state['printer'] = ReceiptPrinter(paper_size=size)
+                top_offset = float(combo_top_offset.value()) if combo_top_offset else 0.0
+                comp_scale = float(combo_comp_scale.value()) if combo_comp_scale else 1.0
+                state['printer'] = ReceiptPrinter(paper_size=size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
                 
                 tmp_dir = tempfile.gettempdir()
                 state['tmp_png'] = os.path.join(tmp_dir, f"receipt_merged_preview_{os.getpid()}.png")
