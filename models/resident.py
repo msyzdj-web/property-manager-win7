@@ -62,10 +62,10 @@ class Resident(Base):
         b = getattr(self, 'building', None)
         u = getattr(self, 'unit', None)
         if b is not None and str(b).strip() != '':
-            parts.append(str(b).strip())
+            parts.append(str(b).strip().replace(' ', ''))
         if u is not None and str(u).strip() != '':
-            parts.append(str(u).strip())
+            parts.append(str(u).strip().replace(' ', ''))
         # 房号总是加入，保证非空输出
-        parts.append(str(self.room_no).strip())
+        parts.append(str(self.room_no).strip().replace(' ', ''))
         return "-".join(parts)
 

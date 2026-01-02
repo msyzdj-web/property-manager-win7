@@ -7,7 +7,7 @@ from PyQt5.QtGui import QPainter, QFont, QFontMetrics, QPen, QImage, QColor, QPi
 import tempfile
 import os
 from PyQt5.QtCore import Qt, QRect
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from services.payment_service import PaymentService
 from decimal import Decimal, ROUND_HALF_UP
@@ -347,10 +347,24 @@ class ReceiptPrinter:
                 item_name = payment.charge_item.name if payment.charge_item else ""
                 billing_period = ""
                 if payment.billing_start_date and payment.billing_end_date:
+                    # 显示时将结束日期显示为实际结束日前一天（用户要求）
+                    try:
+                        end_display = (payment.billing_end_date - timedelta(days=1))
+                    except Exception:
+                        end_display = payment.billing_end_date
                     if is_small_paper:
-                        billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{payment.billing_end_date.strftime('%y.%m.%d')}"
+                        billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{end_display.strftime('%y.%m.%d')}"
                     else:
-                        billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
+                        billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
+                    if payment.billing_start_date and payment.billing_end_date:
+                        try:
+                            end_display = (payment.billing_end_date - timedelta(days=1))
+                        except Exception:
+                            end_display = payment.billing_end_date
+                        if is_small_paper:
+                            billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{end_display.strftime('%y.%m.%d')}"
+                        else:
+                            billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
                 # 将金额四舍五入为整数元用于显示
                 try:
                     amt_int = int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP)) if getattr(payment, 'amount', None) is not None else 0
