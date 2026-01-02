@@ -2,8 +2,9 @@
 收据打印对话框
 """
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QTextEdit, QMessageBox, QComboBox, QDoubleSpinBox)
+                             QPushButton, QTextEdit, QMessageBox, QComboBox, QDoubleSpinBox, QScrollArea)
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QPixmap
 from datetime import datetime, timedelta
 import os
 
@@ -30,14 +31,14 @@ class ReceiptDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
-        # 收据预览
-        self.receipt_preview = QTextEdit()
-        self.receipt_preview.setReadOnly(True)
-        self.receipt_preview.setFont(self.font())
-        # 关闭自动换行，使用水平滚动以保证表格宽度不被压缩
-        self.receipt_preview.setLineWrapMode(QTextEdit.NoWrap)
-        self.receipt_preview.setAcceptRichText(True)
-        layout.addWidget(self.receipt_preview)
+        # 收据预览（使用图像预览以保证与导出的一致性）
+        self.receipt_preview_label = QLabel()
+        self.receipt_preview_label.setAlignment(Qt.AlignCenter)
+        self.receipt_preview_label.setMinimumSize(200, 100)
+        self.receipt_scroll = QScrollArea()
+        self.receipt_scroll.setWidgetResizable(True)
+        self.receipt_scroll.setWidget(self.receipt_preview_label)
+        layout.addWidget(self.receipt_scroll)
         
         # 纸张尺寸选择
         paper_layout = QHBoxLayout()
@@ -121,10 +122,49 @@ class ReceiptDialog(QDialog):
                 QMessageBox.warning(self, '提示', '缴费记录不存在')
                 self.reject()
                 return
-            
-            # 生成收据 HTML 预览（与打印样式一致）
+
+            # 生成与导出一致的图片预览（渲染为 PNG 再显示），保证 UI 与导出文件内容一致
+            try:
+                import tempfile, os
+                tmp_dir = tempfile.gettempdir()
+                tmp_png = os.path.join(tmp_dir, f"receipt_preview_{self.payment_id}.png")
+                paper_size = self.paper_size_combo.currentText()
+                top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+                comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+                from utils.printer import ReceiptPrinter
+                printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
+                # 预览使用 300dpi 输出与导出匹配像素比，UI 会缩放显示
+                ok = printer.render_receipt_to_image(self.payment_id, tmp_png, dpi=300)
+                if ok and os.path.exists(tmp_png):
+                    pix = QPixmap(tmp_png)
+                    if not pix.isNull():
+                        # 将图片按滚动视口宽度缩放以便预览，但保持比例
+                        vw = self.receipt_scroll.viewport().width() or 800
+                        scaled = pix.scaledToWidth(vw - 20, Qt.SmoothTransformation)
+                        self.receipt_preview_label.setPixmap(scaled)
+                        self.receipt_preview_label.resize(scaled.size())
+                        return
+            except Exception:
+                # 渲染失败则回退到 HTML 预览（保持原有体验）
+                pass
+
+            # 回退：生成 HTML 预览（当图片渲染不可用时）
             receipt_html = self.generate_receipt_html(payment)
-            self.receipt_preview.setHtml(receipt_html)
+            # 如果回退为 HTML，需要把 label 显示 HTML（转换为 QPixmap via QTextDocument）
+            try:
+                from PyQt5.QtGui import QTextDocument
+                doc = QTextDocument()
+                doc.setHtml(receipt_html)
+                img = QPixmap(doc.size().toSize())
+                img.fill(Qt.white)
+                painter = QPainter(img)
+                doc.drawContents(painter)
+                painter.end()
+                self.receipt_preview_label.setPixmap(img)
+                self.receipt_preview_label.resize(img.size())
+            except Exception:
+                # 最后回退：直接把 HTML 放到文本框样式字符串显示为简单文本
+                self.receipt_preview_label.setText(receipt_html)
         except Exception as e:
             QMessageBox.critical(self, '错误', f'加载收据失败：{str(e)}')
             self.reject()
