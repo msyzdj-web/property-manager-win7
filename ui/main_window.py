@@ -9,6 +9,8 @@ from PyQt5.QtWidgets import QInputDialog
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont, QPixmap
 import os
+import json
+from pathlib import Path
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -828,6 +830,24 @@ class MainWindow(QMainWindow):
             combo_top_offset.setSingleStep(0.5)
             combo_top_offset.setValue(3.0)
             hbox_ctrl.addWidget(combo_top_offset)
+            # 尝试加载用户设置并应用到合并预览控件
+            try:
+                cfg = Path.home() / '.property_manager_settings.json'
+                if cfg.exists():
+                    data = json.loads(cfg.read_text(encoding='utf-8'))
+                    if 'top_offset_mm' in data:
+                        combo_top_offset.setValue(float(data.get('top_offset_mm', combo_top_offset.value())))
+                    if 'company_font_scale_adj' in data:
+                        combo_comp_scale.setValue(float(data.get('company_font_scale_adj', combo_comp_scale.value())))
+                    # 左右边距（若存在）
+                    if 'left_margin_mm' in data and 'right_margin_mm' in data:
+                        try:
+                            combo_left_margin.setValue(float(data.get('left_margin_mm', combo_left_margin.value())))
+                            combo_right_margin.setValue(float(data.get('right_margin_mm', combo_right_margin.value())))
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             # 标题缩放系数
             hbox_ctrl.addWidget(QLabel(" 标题缩放:"))
             combo_comp_scale = QDoubleSpinBox()

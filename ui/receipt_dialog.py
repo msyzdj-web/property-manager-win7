@@ -7,6 +7,8 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap
 from datetime import datetime, timedelta
 import os
+import json
+from pathlib import Path
 
 from services.payment_service import PaymentService
 from utils.printer import ReceiptPrinter
@@ -20,6 +22,11 @@ class ReceiptDialog(QDialog):
         super().__init__(parent)
         self.payment_id = payment_id
         self.init_ui()
+        # 加载用户保存的打印设置（若存在）
+        try:
+            self._load_user_settings()
+        except Exception:
+            pass
         self.load_receipt()
     
     def init_ui(self):
@@ -64,6 +71,9 @@ class ReceiptDialog(QDialog):
         self.company_scale_spin.setValue(0.95)
         self.company_scale_spin.valueChanged.connect(lambda _: self.load_receipt())
         paper_layout.addWidget(self.company_scale_spin)
+        # 绑定保存设置的信号（在每次改动时保存）
+        self.top_offset_spin.valueChanged.connect(self._save_user_settings)
+        self.company_scale_spin.valueChanged.connect(self._save_user_settings)
         # 左右安全边距（mm）
         paper_layout.addWidget(QLabel(' 左边距(mm):'))
         self.left_margin_spin = QDoubleSpinBox()
@@ -72,6 +82,7 @@ class ReceiptDialog(QDialog):
         self.left_margin_spin.setValue(4.0)
         self.left_margin_spin.valueChanged.connect(lambda _: self.load_receipt())
         paper_layout.addWidget(self.left_margin_spin)
+        self.left_margin_spin.valueChanged.connect(self._save_user_settings)
 
         paper_layout.addWidget(QLabel(' 右边距(mm):'))
         self.right_margin_spin = QDoubleSpinBox()
@@ -80,6 +91,7 @@ class ReceiptDialog(QDialog):
         self.right_margin_spin.setValue(8.0)
         self.right_margin_spin.valueChanged.connect(lambda _: self.load_receipt())
         paper_layout.addWidget(self.right_margin_spin)
+        self.right_margin_spin.valueChanged.connect(self._save_user_settings)
         paper_layout.addStretch()
         layout.addLayout(paper_layout)
         
@@ -186,6 +198,54 @@ class ReceiptDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, '错误', f'加载收据失败：{str(e)}')
             self.reject()
+
+    def _settings_file(self) -> Path:
+        """返回用于保存用户打印配置的文件路径"""
+        home = Path.home()
+        cfg = home / '.property_manager_settings.json'
+        return cfg
+
+    def _load_user_settings(self):
+        """从文件加载用户设置并应用到控件"""
+        cfg = self._settings_file()
+        if not cfg.exists():
+            return
+        try:
+            data = json.loads(cfg.read_text(encoding='utf-8'))
+        except Exception:
+            return
+        # 应用已保存值（若存在）
+        try:
+            if 'top_offset_mm' in data:
+                self.top_offset_spin.setValue(float(data.get('top_offset_mm', self.top_offset_spin.value())))
+            if 'company_font_scale_adj' in data:
+                self.company_scale_spin.setValue(float(data.get('company_font_scale_adj', self.company_scale_spin.value())))
+            if 'left_margin_mm' in data:
+                self.left_margin_spin.setValue(float(data.get('left_margin_mm', self.left_margin_spin.value())))
+            if 'right_margin_mm' in data:
+                self.right_margin_spin.setValue(float(data.get('right_margin_mm', self.right_margin_spin.value())))
+        except Exception:
+            pass
+
+    def _save_user_settings(self):
+        """将当前控件值保存到用户配置文件（即时保存）"""
+        cfg = self._settings_file()
+        try:
+            cur = {}
+            if cfg.exists():
+                try:
+                    cur = json.loads(cfg.read_text(encoding='utf-8')) or {}
+                except Exception:
+                    cur = {}
+            cur.update({
+                'top_offset_mm': float(self.top_offset_spin.value()),
+                'company_font_scale_adj': float(self.company_scale_spin.value()),
+                'left_margin_mm': float(self.left_margin_spin.value()),
+                'right_margin_mm': float(self.right_margin_spin.value()),
+            })
+            cfg.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding='utf-8')
+        except Exception:
+            pass
     
     def generate_receipt_text(self, payment):
         """生成收据文本"""
