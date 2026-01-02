@@ -243,9 +243,9 @@ class ReceiptPrinter:
 
             # 页面尺寸与边距
             margin = int(width * margin_scale)
-            # 最小页边距，避免内容过贴边导致打印被裁切
-            if margin < 20:
-                margin = 20
+            # 最小页边距，避免内容过贴边导致打印被裁切（针式打印机更保守）
+            if margin < 30:
+                margin = 30
             content_width = width - 2 * margin
             y = margin
             
@@ -328,12 +328,38 @@ class ReceiptPrinter:
             info_y = y
             now = datetime.now()
             # 日期格式（包含时分秒）
+            # 生成房号显示，优先使用 Resident 的 building/unit/room_no 组合（确保使用 '-' 分隔）
+            def format_full_room(resident):
+                try:
+                    b = getattr(resident, 'building', '') or ''
+                    u = getattr(resident, 'unit', '') or ''
+                    r = getattr(resident, 'room_no', '') or ''
+                    parts = []
+                    if b != '':
+                        parts.append(str(b).strip())
+                    if u != '':
+                        parts.append(str(u).strip())
+                    if r != '':
+                        # 如果 room_no 本身包含 spaces like '11 101', normalize by removing spaces
+                        rn = str(r).strip().replace(' ', '-')
+                        parts.append(rn)
+                    if parts:
+                        return "-".join(parts)
+                except Exception:
+                    pass
+                # fallback to existing attributes
+                try:
+                    return getattr(resident, 'full_room_no', getattr(resident, 'room_no', ''))
+                except Exception:
+                    return ''
+
+            room_display_val = format_full_room(payment.resident)
             if is_narrow_paper:
                 date_text = now.strftime("%Y.%m.%d %H:%M:%S")
-                info_text = f"户名:{payment.resident.name} 房号:{getattr(payment.resident, 'full_room_no', payment.resident.room_no)}"
+                info_text = f"户名:{payment.resident.name} 房号:{room_display_val}"
             else:
                 date_text = f"日期：{now.strftime('%Y年%m月%d日 %H:%M:%S')}"
-                info_text = f"户名：{payment.resident.name}    房号：{getattr(payment.resident, 'full_room_no', payment.resident.room_no)}"
+                info_text = f"户名：{payment.resident.name}    房号：{room_display_val}"
             
             painter.drawText(QRect(start_x, info_y, c1 + c2, row_height), Qt.AlignLeft | Qt.AlignVCenter, info_text)
             painter.drawText(QRect(start_x + c1 + c2, info_y, c3 + c4, row_height), Qt.AlignRight | Qt.AlignVCenter, date_text)
@@ -470,6 +496,12 @@ class ReceiptPrinter:
                         return dt.replace(year=year, month=month, day=day)
                     start = payment.billing_start_date
                     end_paid = add_months(start, int(payment.paid_months))
+                    # 实收周期通常表示到实际结束日前一日，调整为包含前一日
+                    try:
+                        from datetime import timedelta
+                        end_paid = end_paid - timedelta(days=1)
+                    except Exception:
+                        pass
                     if is_small_paper:
                         paid_period_text = f"{start.strftime('%y.%m.%d')}-{end_paid.strftime('%y.%m.%d')}"
                     else:
@@ -829,6 +861,11 @@ class ReceiptPrinter:
                     if getattr(p, 'paid_months', 0) and p.paid_months > 0 and p.billing_start_date:
                         start_paid = p.billing_start_date
                         end_paid = add_months(start_paid, int(p.paid_months))
+                        try:
+                            from datetime import timedelta
+                            end_paid = end_paid - timedelta(days=1)
+                        except Exception:
+                            pass
                         billing_period_line = f"{start_paid.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
                     else:
                         billing_period_line = f"{p.billing_start_date.strftime('%Y.%m.%d')}–{p.billing_end_date.strftime('%Y.%m.%d')}" if p.billing_start_date and p.billing_end_date else (p.period or "")
