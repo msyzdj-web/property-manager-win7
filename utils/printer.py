@@ -21,7 +21,7 @@ class ReceiptPrinter:
         '收据纸 (241×93mm)': (241, 93),
     }
     
-    def __init__(self, paper_size='A4', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0, safe_margin_mm: float = 8.0):
+    def __init__(self, paper_size='A4', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0, safe_margin_mm: float = 8.0, safe_margin_left_mm: float = None, safe_margin_right_mm: float = None):
         """
         top_offset_mm: 页面内容向上平移的毫米数（用于针式打印机微调）
         company_font_scale_adj: 公司标题与主标题的字体缩放系数（<1 缩小, >1 放大）
@@ -34,6 +34,9 @@ class ReceiptPrinter:
         self.safe_margin_mm = float(safe_margin_mm)
         # 在 render/print 时会计算为像素值并赋给此属性
         self._top_offset_px = 0
+        # 可选左右安全边距（mm），若未提供则使用 safe_margin_mm
+        self.safe_margin_left_mm = float(safe_margin_left_mm) if safe_margin_left_mm is not None else None
+        self.safe_margin_right_mm = float(safe_margin_right_mm) if safe_margin_right_mm is not None else None
         # 确保在创建 QPrinter 前存在 QApplication，避免 headless 调用时崩溃（render/print 调用会在 GUI 环境下已有 QApplication）
         self._created_qapp = False
         try:
@@ -166,10 +169,15 @@ class ReceiptPrinter:
             try:
                 mm_per_inch = 25.4
                 self._top_offset_px = int(self.top_offset_mm / mm_per_inch * dpi)
-                self._safe_margin_px = int(self.safe_margin_mm / mm_per_inch * dpi)
+                # 左右安全边距像素化
+                left_mm = self.safe_margin_left_mm if self.safe_margin_left_mm is not None else self.safe_margin_mm
+                right_mm = self.safe_margin_right_mm if self.safe_margin_right_mm is not None else self.safe_margin_mm
+                self._safe_margin_left_px = int(left_mm / mm_per_inch * dpi) if left_mm is not None else 0
+                self._safe_margin_right_px = int(right_mm / mm_per_inch * dpi) if right_mm is not None else 0
             except Exception:
                 self._top_offset_px = 0
-                self._safe_margin_px = 0
+                self._safe_margin_left_px = 0
+                self._safe_margin_right_px = 0
 
             # 开始绘制到打印机
             painter = QPainter()
@@ -277,24 +285,28 @@ class ReceiptPrinter:
             small_font = get_font(0.9)           # 小字
             bold_font = get_font(1.0, True)      # 正文粗体
 
-            # 页面尺寸与边距
-            margin = int(width * margin_scale)
+            # 页面尺寸与边距（支持左右独立安全边距）
+            base_margin = int(width * margin_scale)
             # 最小页边距，避免内容过贴边导致打印被裁切（针式打印机更保守）
+            if base_margin < 30:
+                base_margin = 30
             try:
-                safe_px = int(getattr(self, '_safe_margin_px', 0))
+                left_safe_px = int(getattr(self, '_safe_margin_left_px', 0))
             except Exception:
-                safe_px = 0
-            # 设置 margin 至至少 safe_px（优先），同时保持之前基于比例与最小像素阈值的约束
-            if margin < 30:
-                margin = 30
-            if safe_px > margin:
-                margin = safe_px
-            content_width = width - 2 * margin
+                left_safe_px = 0
+            try:
+                right_safe_px = int(getattr(self, '_safe_margin_right_px', 0))
+            except Exception:
+                right_safe_px = 0
+            margin_left = max(base_margin, left_safe_px)
+            margin_right = max(base_margin, right_safe_px)
+            content_width = width - margin_left - margin_right
             # 应用顶部像素偏移（render/print 路径会提前将 self.top_offset_mm 转换为 self._top_offset_px）
             try:
-                y = max(0, margin - int(getattr(self, '_top_offset_px', 0)))
+                top_offset_px = int(getattr(self, '_top_offset_px', 0))
+                y = max(0, base_margin - top_offset_px)
             except Exception:
-                y = margin
+                y = base_margin
             
             # 行高计算
             if is_wide_paper:
@@ -313,13 +325,13 @@ class ReceiptPrinter:
                         # LOGO高度设为行高的2.5倍
                         logo_h = int(row_height * 2.5)
                         scaled_logo = logo_pixmap.scaledToHeight(logo_h, Qt.SmoothTransformation)
-                        # 绘制在 margin 左侧
-                        painter.drawPixmap(margin, y, scaled_logo)
+                        # 绘制在左边距位置
+                        painter.drawPixmap(margin_left, y, scaled_logo)
             except Exception:
                 pass
 
             painter.setFont(company_font)
-            company_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            company_rect = QRect(margin_left, y, content_width, int(row_height * 1.5))
             painter.drawText(company_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
             y += company_rect.height()
             # 保持公司抬头与标题之间合理间距，避免过度压缩导致下方签名区域被挤出页底
@@ -327,7 +339,7 @@ class ReceiptPrinter:
 
             # 收据大标题
             painter.setFont(title_font)
-            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            title_rect = QRect(margin_left, y, content_width, int(row_height * 1.5))
             painter.drawText(title_rect, Qt.AlignCenter, "收费收据")
             # 标题与表格之间的间距，保留一定空间以保证整体布局不拥挤
             y += title_rect.height() + int(row_height * 0.35)
@@ -340,7 +352,7 @@ class ReceiptPrinter:
             else:
                 table_width = int(content_width * 0.9)
             
-            start_x = margin + int((content_width - table_width) / 2)
+            start_x = margin_left + int((content_width - table_width) / 2)
             
             # 票据编号：前缀为缴费记录创建日期（YYYYMMDD），后三位为打印流水序号（若外部提供则使用，否则预览时读取当日下一个序号）
             try:
@@ -470,7 +482,8 @@ class ReceiptPrinter:
             # 若表格过高以致签名/底部空间不足，则减少明细行数以保证签名能正常绘制
             try:
                 sig_est_height = int(row_height * 2.5)  # 预留签名与提示行高度
-                available_space = height - margin - table_top - sig_est_height
+                # 使用左右较大的边距作为底部安全边距参考
+                available_space = height - max(margin_left, margin_right) - table_top - sig_est_height
                 max_total_rows = max(1, available_space // max(1, row_height))
                 if total_table_rows > max_total_rows:
                     # 需减少 num_rows
@@ -626,7 +639,7 @@ class ReceiptPrinter:
             # 如果过低可能会超出页底，做保险检查并向上调整（保留少量额外间距）
             try:
                 extra_pad = int(row_height * 0.5)
-                bottom_limit = height - margin - sig_height - extra_pad
+                bottom_limit = height - max(margin_left, margin_right) - sig_height - extra_pad
                 if sig_y > bottom_limit:
                     sig_y = max(y, bottom_limit)
             except Exception:
@@ -930,10 +943,26 @@ class ReceiptPrinter:
             
             row_height = int(base_pixel_size * row_height_factor)
 
-            # 边距
-            margin = int(width * margin_scale)
-            content_width = width - 2 * margin
-            y = margin
+            # 边距（支持左右独立安全边距）
+            base_margin = int(width * margin_scale)
+            if base_margin < 30:
+                base_margin = 30
+            try:
+                left_safe_px = int(getattr(self, '_safe_margin_left_px', 0))
+            except Exception:
+                left_safe_px = 0
+            try:
+                right_safe_px = int(getattr(self, '_safe_margin_right_px', 0))
+            except Exception:
+                right_safe_px = 0
+            margin_left = max(base_margin, left_safe_px)
+            margin_right = max(base_margin, right_safe_px)
+            content_width = width - margin_left - margin_right
+            try:
+                top_offset_px = int(getattr(self, '_top_offset_px', 0))
+                y = max(0, base_margin - top_offset_px)
+            except Exception:
+                y = base_margin
 
             # 绘制LOGO
             try:
@@ -944,13 +973,13 @@ class ReceiptPrinter:
                         # LOGO高度设为行高的2.5倍
                         logo_h = int(row_height * 2.5)
                         scaled_logo = logo_pixmap.scaledToHeight(logo_h, Qt.SmoothTransformation)
-                        painter.drawPixmap(margin, y, scaled_logo)
+                        painter.drawPixmap(margin_left, y, scaled_logo)
             except Exception:
                 pass
 
             # 标题区域
             painter.setFont(company_font)
-            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            title_rect = QRect(margin_left, y, content_width, int(row_height * 1.5))
             painter.drawText(title_rect, Qt.AlignCenter, "四川盛涵物业服务有限公司")
             # 宽纸且空间紧凑时，减少间距
             y += title_rect.height()
@@ -958,7 +987,7 @@ class ReceiptPrinter:
                  y += int(row_height * 0.1)
             
             painter.setFont(title_font)
-            title_rect = QRect(margin, y, content_width, int(row_height * 1.5))
+            title_rect = QRect(margin_left, y, content_width, int(row_height * 1.5))
             painter.drawText(title_rect, Qt.AlignCenter, "收费收据（合并）")
             y += title_rect.height()
             if not is_wide_paper:
@@ -966,7 +995,7 @@ class ReceiptPrinter:
 
             # 表格
             table_width = int(content_width * table_width_pct)
-            start_x = margin + int((content_width - table_width) / 2)
+            start_x = margin_left + int((content_width - table_width) / 2)
             
             # 列宽分配
             if is_small_paper:
@@ -1109,7 +1138,7 @@ class ReceiptPrinter:
             else:
                 # 标准模式：尝试置于底部，但确保不覆盖内容
                 extra_pad = int(row_height * 0.3)
-                bottom_y = int(page_rect.y() + (page_rect.height()) - margin - sig_height - extra_pad)
+                bottom_y = int(page_rect.y() + (page_rect.height()) - max(margin_left, margin_right) - sig_height - extra_pad)
                 sig_y = max(y + 10, bottom_y)
             left_x = int(start_x)
             right_x = int(start_x + table_width - int(table_width / 2))

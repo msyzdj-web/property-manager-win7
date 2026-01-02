@@ -64,6 +64,14 @@ class ReceiptDialog(QDialog):
         self.company_scale_spin.setValue(0.95)
         self.company_scale_spin.valueChanged.connect(lambda _: self.load_receipt())
         paper_layout.addWidget(self.company_scale_spin)
+        # 安全边距（mm）
+        paper_layout.addWidget(QLabel(' 边距(mm):'))
+        self.safe_margin_spin = QDoubleSpinBox()
+        self.safe_margin_spin.setRange(0.0, 20.0)
+        self.safe_margin_spin.setSingleStep(0.5)
+        self.safe_margin_spin.setValue(8.0)
+        self.safe_margin_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.safe_margin_spin)
         paper_layout.addStretch()
         layout.addLayout(paper_layout)
         
@@ -132,7 +140,8 @@ class ReceiptDialog(QDialog):
                 top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
                 comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
                 from utils.printer import ReceiptPrinter
-                printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
+                safe_margin = float(getattr(self, 'safe_margin_spin', None).value()) if getattr(self, 'safe_margin_spin', None) else 8.0
+                printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_mm=safe_margin)
                 # 预览使用 300dpi 输出与导出匹配像素比，UI 会缩放显示
                 ok = printer.render_receipt_to_image(self.payment_id, tmp_png, dpi=300)
                 if ok and os.path.exists(tmp_png):
@@ -447,7 +456,8 @@ th {{ background:#f5f5f5; font-weight:600; }}
             paper_size = self.paper_size_combo.currentText()
             top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
             comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
-            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
+            safe_margin = float(getattr(self, 'safe_margin_spin', None).value()) if getattr(self, 'safe_margin_spin', None) else 8.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_mm=safe_margin)
             if printer.print_receipt(self.payment_id):
                 QMessageBox.information(self, '成功', '打印成功')
             else:
@@ -483,7 +493,8 @@ th {{ background:#f5f5f5; font-weight:600; }}
             paper_size = self.paper_size_combo.currentText()
             top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
             comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
-            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
+            safe_margin = float(getattr(self, 'safe_margin_spin', None).value()) if getattr(self, 'safe_margin_spin', None) else 8.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_mm=safe_margin)
             success = printer.print_receipt(self.payment_id, output_file=path)
             if success:
                 QMessageBox.information(self, '成功', f'已保存 PDF：{path}')
