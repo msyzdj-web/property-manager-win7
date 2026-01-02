@@ -503,9 +503,8 @@ th {{ background:#f5f5f5; font-weight:600; }}
             paper_size = self.paper_size_combo.currentText()
             top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
             comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
-            left_margin = float(getattr(self, 'left_margin_spin', None).value()) if getattr(self, 'left_margin_spin', None) else 4.0
-            right_margin = float(getattr(self, 'right_margin_spin', None).value()) if getattr(self, 'right_margin_spin', None) else 8.0
-            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
+            safe_margin = float(getattr(self, 'safe_margin_spin', None).value()) if getattr(self, 'safe_margin_spin', None) else 8.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_mm=safe_margin)
             success = printer.print_receipt(self.payment_id, output_file=path)
             if success:
                 QMessageBox.information(self, '成功', f'已保存 PDF：{path}')

@@ -835,6 +835,19 @@ class MainWindow(QMainWindow):
             combo_comp_scale.setSingleStep(0.01)
             combo_comp_scale.setValue(0.95)
             hbox_ctrl.addWidget(combo_comp_scale)
+            # 左右边距
+            hbox_ctrl.addWidget(QLabel(" 左边距(mm):"))
+            combo_left_margin = QDoubleSpinBox()
+            combo_left_margin.setRange(0.0, 20.0)
+            combo_left_margin.setSingleStep(0.5)
+            combo_left_margin.setValue(4.0)
+            hbox_ctrl.addWidget(combo_left_margin)
+            hbox_ctrl.addWidget(QLabel(" 右边距(mm):"))
+            combo_right_margin = QDoubleSpinBox()
+            combo_right_margin.setRange(0.0, 20.0)
+            combo_right_margin.setSingleStep(0.5)
+            combo_right_margin.setValue(8.0)
+            hbox_ctrl.addWidget(combo_right_margin)
             hbox_ctrl.addStretch()
             vbox.addLayout(hbox_ctrl)
             
@@ -862,7 +875,9 @@ class MainWindow(QMainWindow):
                 size = combo_size.currentText()
                 top_offset = float(combo_top_offset.value()) if combo_top_offset else 0.0
                 comp_scale = float(combo_comp_scale.value()) if combo_comp_scale else 1.0
-                state['printer'] = ReceiptPrinter(paper_size=size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
+                left_margin = float(combo_left_margin.value()) if combo_left_margin else 4.0
+                right_margin = float(combo_right_margin.value()) if combo_right_margin else 8.0
+                state['printer'] = ReceiptPrinter(paper_size=size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
                 
                 tmp_dir = tempfile.gettempdir()
                 state['tmp_png'] = os.path.join(tmp_dir, f"receipt_merged_preview_{os.getpid()}.png")
