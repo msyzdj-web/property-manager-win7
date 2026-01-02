@@ -379,7 +379,7 @@ class ReceiptPrinter:
                     except Exception:
                         end_display = payment.billing_end_date
                     if is_small_paper:
-                        billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{end_display.strftime('%y.%m.%d')}"
+                        billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}-{end_display.strftime('%Y.%m.%d')}"
                     else:
                         billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
                     if payment.billing_start_date and payment.billing_end_date:
@@ -388,7 +388,7 @@ class ReceiptPrinter:
                         except Exception:
                             end_display = payment.billing_end_date
                         if is_small_paper:
-                            billing_period = f"{payment.billing_start_date.strftime('%y.%m.%d')}-{end_display.strftime('%y.%m.%d')}"
+                            billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}-{end_display.strftime('%Y.%m.%d')}"
                         else:
                             billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
                 # 将金额四舍五入为整数元用于显示
@@ -503,7 +503,7 @@ class ReceiptPrinter:
                     except Exception:
                         pass
                     if is_small_paper:
-                        paid_period_text = f"{start.strftime('%y.%m.%d')}-{end_paid.strftime('%y.%m.%d')}"
+                        paid_period_text = f"{start.strftime('%Y.%m.%d')}-{end_paid.strftime('%Y.%m.%d')}"
                     else:
                         paid_period_text = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
                     try:
