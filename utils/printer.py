@@ -149,6 +149,17 @@ class ReceiptPrinter:
                         pass
                     self.printer.setOutputFileName(output_file)
             else:
+                # 在展示打印对话框前尝试启用 FullPage 并清空页面边距以避免打印机驱动强制缩放或左右不对称
+                try:
+                    # Full page 可以让我们把图像按物理尺寸直接绘制到页面上（避免打印机默认边距）
+                    self.printer.setFullPage(True)
+                except Exception:
+                    pass
+                try:
+                    # 将页边距设为 0mm（如果支持）
+                    self.printer.setPageMargins(0, 0, 0, 0, QPrinter.Millimeter)
+                except Exception:
+                    pass
                 # 显示打印对话框（不在此处修改纸张尺寸以避免 macOS 的 Custom 纸张冲突提示）
                 print_dialog = QPrintDialog(self.printer)
                 if print_dialog.exec_() != QPrintDialog.Accepted:
@@ -208,6 +219,31 @@ class ReceiptPrinter:
                     return False
                 try:
                     image = QImage(tmp_png)
+                    # 记录诊断信息，帮助定位 Win 打包后驱动差异问题（导出到 exports 目录）
+                    try:
+                        diag = {}
+                        diag['dpi'] = dpi
+                        try:
+                            pr = self.printer.pageRect()
+                            diag['page_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(pr.width()), 'h': int(pr.height())}
+                        except Exception:
+                            diag['page_rect'] = None
+                        diag['image_size'] = {'w': image.width(), 'h': image.height()}
+                        diag['target_mm'] = {'w_mm': self._target_w_mm, 'h_mm': self._target_h_mm}
+                        exports_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'exports'))
+                        try:
+                            os.makedirs(exports_dir, exist_ok=True)
+                        except Exception:
+                            pass
+                        diag_path = os.path.join(exports_dir, f'print_diag_{payment_id}.json')
+                        try:
+                            import json
+                            with open(diag_path, 'w', encoding='utf-8') as f:
+                                json.dump(diag, f, ensure_ascii=False, indent=2)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
                     # 计算期望的像素宽高（以打印机 DPI 为基准）
                     mm_per_inch = 25.4
                     desired_w_px = int(self._target_w_mm / mm_per_inch * dpi)
