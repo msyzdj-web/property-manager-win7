@@ -830,7 +830,34 @@ class MainWindow(QMainWindow):
             combo_top_offset.setSingleStep(0.5)
             combo_top_offset.setValue(3.0)
             hbox_ctrl.addWidget(combo_top_offset)
-            # 尝试加载用户设置并应用到合并预览控件
+            # 标题缩放系数
+            hbox_ctrl.addWidget(QLabel(" 标题缩放:"))
+            combo_comp_scale = QDoubleSpinBox()
+            combo_comp_scale.setRange(0.6, 1.2)
+            combo_comp_scale.setSingleStep(0.01)
+            combo_comp_scale.setValue(0.95)
+            hbox_ctrl.addWidget(combo_comp_scale)
+            # 内容字号缩放系数
+            hbox_ctrl.addWidget(QLabel(" 内容字号:"))
+            combo_content_scale = QDoubleSpinBox()
+            combo_content_scale.setRange(0.7, 1.3)
+            combo_content_scale.setSingleStep(0.01)
+            combo_content_scale.setValue(1.00)
+            hbox_ctrl.addWidget(combo_content_scale)
+            # 左右边距
+            hbox_ctrl.addWidget(QLabel(" 左边距(mm):"))
+            combo_left_margin = QDoubleSpinBox()
+            combo_left_margin.setRange(0.0, 20.0)
+            combo_left_margin.setSingleStep(0.5)
+            combo_left_margin.setValue(4.0)
+            hbox_ctrl.addWidget(combo_left_margin)
+            hbox_ctrl.addWidget(QLabel(" 右边距(mm):"))
+            combo_right_margin = QDoubleSpinBox()
+            combo_right_margin.setRange(0.0, 20.0)
+            combo_right_margin.setSingleStep(0.5)
+            combo_right_margin.setValue(8.0)
+            hbox_ctrl.addWidget(combo_right_margin)
+            # 尝试加载用户设置并应用到合并预览控件（放在控件创建后）
             try:
                 cfg = Path.home() / '.property_manager_settings.json'
                 if cfg.exists():
@@ -839,6 +866,11 @@ class MainWindow(QMainWindow):
                         combo_top_offset.setValue(float(data.get('top_offset_mm', combo_top_offset.value())))
                     if 'company_font_scale_adj' in data:
                         combo_comp_scale.setValue(float(data.get('company_font_scale_adj', combo_comp_scale.value())))
+                    if 'content_font_scale' in data:
+                        try:
+                            combo_content_scale.setValue(float(data.get('content_font_scale', combo_content_scale.value())))
+                        except Exception:
+                            pass
                     # 左右边距（若存在）
                     if 'left_margin_mm' in data and 'right_margin_mm' in data:
                         try:
@@ -897,7 +929,8 @@ class MainWindow(QMainWindow):
                 comp_scale = float(combo_comp_scale.value()) if combo_comp_scale else 1.0
                 left_margin = float(combo_left_margin.value()) if combo_left_margin else 4.0
                 right_margin = float(combo_right_margin.value()) if combo_right_margin else 8.0
-                state['printer'] = ReceiptPrinter(paper_size=size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
+                content_scale_val = float(combo_content_scale.value()) if combo_content_scale else 1.0
+                state['printer'] = ReceiptPrinter(paper_size=size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, content_font_scale=content_scale_val, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
                 
                 tmp_dir = tempfile.gettempdir()
                 state['tmp_png'] = os.path.join(tmp_dir, f"receipt_merged_preview_{os.getpid()}.png")

@@ -8,6 +8,7 @@ import tempfile
 import os
 from PyQt5.QtCore import Qt, QRect
 from datetime import datetime, timedelta
+import sys
 
 from services.payment_service import PaymentService
 from decimal import Decimal, ROUND_HALF_UP
@@ -21,15 +22,18 @@ class ReceiptPrinter:
         '收据纸 (241×93mm)': (241, 93),
     }
     
-    def __init__(self, paper_size='A4', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0, safe_margin_mm: float = 8.0, safe_margin_left_mm: float = None, safe_margin_right_mm: float = None):
+    def __init__(self, paper_size='收据纸 (241×93mm)', top_offset_mm: float = 0.0, company_font_scale_adj: float = 1.0, content_font_scale: float = 1.0, safe_margin_mm: float = 8.0, safe_margin_left_mm: float = None, safe_margin_right_mm: float = None):
         """
         top_offset_mm: 页面内容向上平移的毫米数（用于针式打印机微调）
         company_font_scale_adj: 公司标题与主标题的字体缩放系数（<1 缩小, >1 放大）
         """
-        self.paper_size = paper_size
+        # 强制只支持目标收据纸尺寸
+        self.paper_size = '收据纸 (241×93mm)'
         # 调整项
         self.top_offset_mm = float(top_offset_mm)
         self.company_font_scale_adj = float(company_font_scale_adj)
+        # 正文字号缩放系数（影响表格与正文字体大小）
+        self.content_font_scale = float(content_font_scale)
         # 安全边距（毫米），用于针式打印时确保内容不被切掉
         self.safe_margin_mm = float(safe_margin_mm)
         # 在 render/print 时会计算为像素值并赋给此属性
@@ -95,11 +99,19 @@ class ReceiptPrinter:
                     # 设置打印机输出到 PDF 文件
                     try:
                         self.printer.setOutputFormat(QPrinter.PdfFormat)
-                        # 再次强制设置页面尺寸，防止 PDF 模式下重置为 A4
-                        if self.paper_size in self.PAPER_SIZES:
-                            w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+                        # 再次强制设置页面尺寸与分辨率，防止 PDF 模式下重置为 A4
+                        try:
                             from PyQt5.QtCore import QSizeF
-                            self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
+                            if self.paper_size in self.PAPER_SIZES:
+                                w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+                                self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
+                        except Exception:
+                            pass
+                        try:
+                            # 强制设置为 300 DPI，用于生成与渲染图片一致的像素尺寸
+                            self.printer.setResolution(300)
+                        except Exception:
+                            pass
                         self.printer.setOrientation(QPrinter.Portrait)
                     except Exception:
                         pass
@@ -151,15 +163,41 @@ class ReceiptPrinter:
             else:
                 # 在展示打印对话框前尝试启用 FullPage 并清空页面边距以避免打印机驱动强制缩放或左右不对称
                 try:
-                    # Full page 可以让我们把图像按物理尺寸直接绘制到页面上（避免打印机默认边距）
-                    self.printer.setFullPage(True)
-                except Exception:
-                    pass
-                try:
-                    # 将页边距设为 0mm（如果支持）
-                    self.printer.setPageMargins(0, 0, 0, 0, QPrinter.Millimeter)
-                except Exception:
-                    pass
+                    # 尝试强制页面尺寸与分辨率（避免驱动在物理打印时进行额外缩放）
+                    try:
+                        from PyQt5.QtCore import QSizeF
+                        if sys.platform != 'darwin':
+                            if self.paper_size in self.PAPER_SIZES:
+                                w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
+                                try:
+                                    self.printer.setPageSizeMM(QSizeF(w_mm, h_mm))
+                                except Exception:
+                                    pass
+                            try:
+                                self.printer.setResolution(300)
+                            except Exception:
+                                pass
+                            try:
+                                self.printer.setFullPage(True)
+                            except Exception:
+                                pass
+                            try:
+                                self.printer.setPageMargins(0, 0, 0, 0, QPrinter.Millimeter)
+                            except Exception:
+                                pass
+                        else:
+                            # macOS：仍然启用 FullPage 与 0 页边距尝试，但不强制 setPageSizeMM（避免 Custom 冲突提示）
+                            try:
+                                self.printer.setFullPage(True)
+                            except Exception:
+                                pass
+                            try:
+                                self.printer.setPageMargins(0, 0, 0, 0, QPrinter.Millimeter)
+                            except Exception:
+                                pass
+                    except Exception:
+                        # 任何设置失败不阻塞打印流程
+                        pass
                 # 显示打印对话框（不在此处修改纸张尺寸以避免 macOS 的 Custom 纸张冲突提示）
                 print_dialog = QPrintDialog(self.printer)
                 if print_dialog.exec_() != QPrintDialog.Accepted:
@@ -226,6 +264,13 @@ class ReceiptPrinter:
                         try:
                             pr = self.printer.pageRect()
                             diag['page_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(pr.width()), 'h': int(pr.height())}
+                            # 记录我们用于实际绘制的矩形大小（便于诊断）
+                            try:
+                                effective_w = min(desired_w_px, int(pr.width()))
+                                effective_h = min(desired_h_px, int(pr.height()))
+                                diag['effective_draw_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(effective_w), 'h': int(effective_h)}
+                            except Exception:
+                                diag['effective_draw_rect'] = None
                         except Exception:
                             diag['page_rect'] = None
                         diag['image_size'] = {'w': image.width(), 'h': image.height()}
@@ -249,19 +294,49 @@ class ReceiptPrinter:
                     desired_w_px = int(self._target_w_mm / mm_per_inch * dpi)
                     desired_h_px = int(self._target_h_mm / mm_per_inch * dpi)
 
-                    # 缩放图片以匹配目标物理宽度（保留纵横比）
+                    # 缩放图片以匹配目标物理宽度（保留纵横比），但限制不要超过打印机可绘制区域（考虑驱动不可打印边距）
                     from PyQt5.QtCore import QSize
-                    target_size = image.size().scaled(QSize(desired_w_px, desired_h_px), Qt.KeepAspectRatio)
-
-                    # 获取打印机页面可绘制区域并计算居中位置
                     page_rect = self.printer.pageRect()
-                    x = int(page_rect.x() + (page_rect.width() - target_size.width()) // 2)
+
+                    # 计算基于用户设置的安全边距（像素）
+                    try:
+                        left_safe_px = int((self.safe_margin_left_mm if self.safe_margin_left_mm is not None else self.safe_margin_mm) / mm_per_inch * dpi)
+                    except Exception:
+                        left_safe_px = int(self.safe_margin_mm / mm_per_inch * dpi)
+                    try:
+                        right_safe_px = int((self.safe_margin_right_mm if self.safe_margin_right_mm is not None else self.safe_margin_mm) / mm_per_inch * dpi)
+                    except Exception:
+                        right_safe_px = int(self.safe_margin_mm / mm_per_inch * dpi)
+
+                    # 额外给打印驱动留一点安全缓冲（页面宽度的2%或最少20px）
+                    driver_pad = max(int(page_rect.width() * 0.02), 20)
+
+                    # 计算页面上可用的最大图像宽度（像素）
+                    max_available_width = max(0, page_rect.width() - left_safe_px - right_safe_px - driver_pad)
+
+                    # 期望的目标像素（基于物理目标宽度）
+                    desired_w_px = int(self._target_w_mm / mm_per_inch * dpi)
+                    desired_h_px = int(self._target_h_mm / mm_per_inch * dpi)
+
+                    # 限制目标宽度不要超出可用宽度
+                    use_w_px = min(desired_w_px, max_available_width) if max_available_width > 0 else min(desired_w_px, page_rect.width() - driver_pad)
+
+                    target_size = image.size().scaled(QSize(use_w_px, desired_h_px), Qt.KeepAspectRatio)
+
+                    # 计算水平位置：优先保证 left_safe_px，再尽量居中
+                    centered_x = int(page_rect.x() + (page_rect.width() - target_size.width()) // 2)
+                    x = max(int(page_rect.x() + left_safe_px), centered_x)
+
                     # 将 top offset 作为向上微调（在 render 时已应用，但在物理页上仍允许少量偏移）
                     try:
                         top_px = int(self._top_offset_px)
                     except Exception:
                         top_px = 0
                     y = int(page_rect.y() + max(0, top_px))
+
+                    # 最终保证不会越界（确保右侧保留 right_safe_px）
+                    if x + target_size.width() + right_safe_px + driver_pad > page_rect.x() + page_rect.width():
+                        x = max(int(page_rect.x()), page_rect.x() + page_rect.width() - int(target_size.width()) - right_safe_px - driver_pad)
 
                     target_rect = QRect(x, y, int(target_size.width()), int(target_size.height()))
                     painter.drawImage(target_rect, image)
@@ -326,14 +401,10 @@ class ReceiptPrinter:
             width = page_rect.width()
             height = page_rect.height()
             
-            # 判断纸张类型：根据宽高比判断是否为小票纸
-            # A4: 210x297mm (比例 ~0.71), 241x93mm (比例 ~2.6, 横向), 80x200mm (比例 ~0.4)
-            aspect_ratio = width / height if height > 0 else 1.0
-            
-            # 小票纸特征：非常窄（80mm）或非常扁（241x93横向）
-            is_narrow_paper = width < height * 0.5  # 宽度小于高度一半（如80x200mm）
-            is_wide_paper = width > height * 2  # 宽度大于高度2倍（如241x93mm横向）
-            is_small_paper = is_narrow_paper or is_wide_paper
+            # 项目目标：仅支持 241×93mm（宽纸），将所有绘制逻辑视为宽纸模式
+            is_narrow_paper = False
+            is_wide_paper = True
+            is_small_paper = True
             
             # 布局策略：全部基于宽度的百分比计算 PixelSize，确保在任何 DPI 下字体相对纸张宽度的大小一致
             # A4 纸宽较宽，正文字体占比可以小一些；小票纸窄，字体占比要大一些才能看清
@@ -354,6 +425,11 @@ class ReceiptPrinter:
 
             # 计算基准像素大小
             base_pixel_size = int(width * base_font_scale)
+            # 应用用户可调的内容字号缩放（影响表格与正文字体）
+            try:
+                base_pixel_size = int(base_pixel_size * (self.content_font_scale if hasattr(self, 'content_font_scale') else 1.0))
+            except Exception:
+                pass
             
             # 字体生成辅助函数
             def get_font(size_factor, bold=False):
@@ -749,23 +825,15 @@ class ReceiptPrinter:
             if not payment:
                 return False
             
-            # 获取当前纸张尺寸（毫米）
-            if self.paper_size in self.PAPER_SIZES:
-                w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
-                # 如果是横向打印（如241x93），需要交换宽高或者是打印机驱动处理，但对于绘图来说，canvas 尺寸应对应物理纸张
-                # 注意：Qt打印机 Landscape 模式下 pageRect 会自动旋转，但 QImage 需要我们自己设定尺寸
-                # 这里为了简单起见，如果定义的尺寸就是物理尺寸，我们直接使用
-                # 但如果是 Landscape，通常意味着宽 > 高，241x93 本身就是宽>高，所以直接用即可
-                pass
-            else:
-                w_mm, h_mm = 210.0, 297.0  # Default A4
+            # 只使用目标收据纸尺寸（241×93mm）
+            w_mm, h_mm = self._target_w_mm, self._target_h_mm
 
             # 转换为像素（默认根据 dpi 计算）
             mm_per_inch = 25.4
             width_px = int(w_mm / mm_per_inch * dpi)
             height_px = int(h_mm / mm_per_inch * dpi)
             # 特殊处理：当目标为针式宽纸（241×93mm）并且使用 300dpi 时，强制使用精确像素以匹配实际打印测试要求（2847×1098）
-            if self.paper_size == '收据纸 (241×93mm)' and int(dpi) == 300:
+            if int(dpi) == 300:
                 width_px = 2847
                 height_px = 1098
             
@@ -1015,7 +1083,11 @@ class ReceiptPrinter:
                 row_height_factor = 2.2
 
             base_pixel_size = int(width * base_font_scale)
-            
+            # 应用用户可调的内容字号缩放（影响表格与正文字体）
+            try:
+                base_pixel_size = int(base_pixel_size * (self.content_font_scale if hasattr(self, 'content_font_scale') else 1.0))
+            except Exception:
+                pass
             def get_font(size_factor, bold=False):
                 f = QFont('SimSun')
                 f.setPixelSize(int(base_pixel_size * size_factor))
@@ -1238,10 +1310,8 @@ class ReceiptPrinter:
     def render_merged_receipt_to_image(self, payments, output_path, dpi=300):
         """将合并收据渲染为 PNG（payments 为 payment 对象列表）"""
         try:
-            if self.paper_size in self.PAPER_SIZES:
-                w_mm, h_mm = self.PAPER_SIZES[self.paper_size]
-            else:
-                w_mm, h_mm = 210.0, 297.0
+            # 仅支持目标收据纸（241×93mm）
+            w_mm, h_mm = self._target_w_mm, self._target_h_mm
             mm_per_inch = 25.4
             width_px = int(w_mm / mm_per_inch * dpi)
             height_px = int(h_mm / mm_per_inch * dpi)

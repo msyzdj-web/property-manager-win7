@@ -71,6 +71,15 @@ class ReceiptDialog(QDialog):
         self.company_scale_spin.setValue(0.95)
         self.company_scale_spin.valueChanged.connect(lambda _: self.load_receipt())
         paper_layout.addWidget(self.company_scale_spin)
+        # 正文字号缩放系数（内容字号）
+        paper_layout.addWidget(QLabel(' 内容字号:'))
+        self.content_font_spin = QDoubleSpinBox()
+        self.content_font_spin.setRange(0.7, 1.3)
+        self.content_font_spin.setSingleStep(0.01)
+        self.content_font_spin.setValue(1.00)
+        self.content_font_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.content_font_spin)
+        self.content_font_spin.valueChanged.connect(self._save_user_settings)
         # 绑定保存设置的信号（在每次改动时保存）
         self.top_offset_spin.valueChanged.connect(self._save_user_settings)
         self.company_scale_spin.valueChanged.connect(self._save_user_settings)
@@ -162,7 +171,8 @@ class ReceiptDialog(QDialog):
                 from utils.printer import ReceiptPrinter
                 left_margin = float(getattr(self, 'left_margin_spin', None).value()) if getattr(self, 'left_margin_spin', None) else 4.0
                 right_margin = float(getattr(self, 'right_margin_spin', None).value()) if getattr(self, 'right_margin_spin', None) else 8.0
-                printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
+                content_scale = float(getattr(self, 'content_font_spin', None).value()) if getattr(self, 'content_font_spin', None) else 1.0
+                printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, content_font_scale=content_scale, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
                 # 预览使用 300dpi 输出与导出匹配像素比，UI 会缩放显示
                 ok = printer.render_receipt_to_image(self.payment_id, tmp_png, dpi=300)
                 if ok and os.path.exists(tmp_png):
@@ -220,6 +230,11 @@ class ReceiptDialog(QDialog):
                 self.top_offset_spin.setValue(float(data.get('top_offset_mm', self.top_offset_spin.value())))
             if 'company_font_scale_adj' in data:
                 self.company_scale_spin.setValue(float(data.get('company_font_scale_adj', self.company_scale_spin.value())))
+                if 'content_font_scale' in data:
+                    try:
+                        self.content_font_spin.setValue(float(data.get('content_font_scale', self.content_font_spin.value())))
+                    except Exception:
+                        pass
             if 'left_margin_mm' in data:
                 self.left_margin_spin.setValue(float(data.get('left_margin_mm', self.left_margin_spin.value())))
             if 'right_margin_mm' in data:
@@ -240,6 +255,7 @@ class ReceiptDialog(QDialog):
             cur.update({
                 'top_offset_mm': float(self.top_offset_spin.value()),
                 'company_font_scale_adj': float(self.company_scale_spin.value()),
+                'content_font_scale': float(self.content_font_spin.value()),
                 'left_margin_mm': float(self.left_margin_spin.value()),
                 'right_margin_mm': float(self.right_margin_spin.value()),
             })
@@ -332,18 +348,11 @@ class ReceiptDialog(QDialog):
             paid_period = ""
             paid_amount_display = ""
 
-        # 获取纸张设置以调整预览样式（确保预览长宽比与导出图片一致）
-        curr_paper = self.paper_size_combo.currentText()
-        is_wide = "241" in curr_paper
-        is_narrow = "80" in curr_paper
-
-        # 计算目标纸张物理尺寸（mm）
-        if curr_paper == '收据纸 (241×93mm)':
-            target_w_mm, target_h_mm = 241.0, 93.0
-        elif curr_paper == '收据纸 (80×200mm)':
-            target_w_mm, target_h_mm = 80.0, 200.0
-        else:
-            target_w_mm, target_h_mm = 210.0, 297.0
+        # 仅支持收据纸 241×93mm（项目统一目标）
+        curr_paper = '收据纸 (241×93mm)'
+        is_wide = True
+        is_narrow = False
+        target_w_mm, target_h_mm = 241.0, 93.0
 
         # 预览宽度使用预览控件当前可用宽度，保证显示比例与导出图片一致
         try:
