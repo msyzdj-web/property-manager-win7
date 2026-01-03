@@ -198,6 +198,9 @@ class ReceiptPrinter:
                     except Exception:
                         # 任何设置失败不阻塞打印流程
                         pass
+                except Exception:
+                    # 外层设置失败也不阻塞打印流程
+                    pass
                 # 显示打印对话框（不在此处修改纸张尺寸以避免 macOS 的 Custom 纸张冲突提示）
                 print_dialog = QPrintDialog(self.printer)
                 if print_dialog.exec_() != QPrintDialog.Accepted:
