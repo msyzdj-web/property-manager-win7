@@ -2,10 +2,13 @@
 收据打印对话框
 """
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QTextEdit, QMessageBox, QComboBox)
+                             QPushButton, QTextEdit, QMessageBox, QComboBox, QDoubleSpinBox, QScrollArea)
 from PyQt5.QtCore import Qt
-from datetime import datetime
+from PyQt5.QtGui import QPixmap
+from datetime import datetime, timedelta
 import os
+import json
+from pathlib import Path
 
 from services.payment_service import PaymentService
 from utils.printer import ReceiptPrinter
@@ -19,6 +22,11 @@ class ReceiptDialog(QDialog):
         super().__init__(parent)
         self.payment_id = payment_id
         self.init_ui()
+        # 加载用户保存的打印设置（若存在）
+        try:
+            self._load_user_settings()
+        except Exception:
+            pass
         self.load_receipt()
     
     def init_ui(self):
@@ -30,23 +38,69 @@ class ReceiptDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
-        # 收据预览
-        self.receipt_preview = QTextEdit()
-        self.receipt_preview.setReadOnly(True)
-        self.receipt_preview.setFont(self.font())
-        # 关闭自动换行，使用水平滚动以保证表格宽度不被压缩
-        self.receipt_preview.setLineWrapMode(QTextEdit.NoWrap)
-        self.receipt_preview.setAcceptRichText(True)
-        layout.addWidget(self.receipt_preview)
+        # 收据预览（使用图像预览以保证与导出的一致性）
+        self.receipt_preview_label = QLabel()
+        self.receipt_preview_label.setAlignment(Qt.AlignCenter)
+        self.receipt_preview_label.setMinimumSize(200, 100)
+        self.receipt_scroll = QScrollArea()
+        self.receipt_scroll.setWidgetResizable(True)
+        self.receipt_scroll.setWidget(self.receipt_preview_label)
+        layout.addWidget(self.receipt_scroll)
         
         # 纸张尺寸选择
         paper_layout = QHBoxLayout()
         paper_layout.addWidget(QLabel('纸张尺寸：'))
         self.paper_size_combo = QComboBox()
-        self.paper_size_combo.addItems(['A4', '收据纸 (241×93mm)', '收据纸 (80×200mm)'])
-        self.paper_size_combo.setCurrentText('A4')
+        self.paper_size_combo.addItems(['收据纸 (241×93mm)'])
+        self.paper_size_combo.setCurrentText('收据纸 (241×93mm)')
         self.paper_size_combo.currentTextChanged.connect(lambda x: self.load_receipt())
         paper_layout.addWidget(self.paper_size_combo)
+        # 顶部偏移微调（mm）
+        paper_layout.addWidget(QLabel(' 上移(mm):'))
+        self.top_offset_spin = QDoubleSpinBox()
+        self.top_offset_spin.setRange(-10.0, 20.0)
+        self.top_offset_spin.setSingleStep(0.5)
+        self.top_offset_spin.setValue(3.0)  # 安全默认，针式打印常用向上偏移
+        self.top_offset_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.top_offset_spin)
+        # 公司标题缩放系数
+        paper_layout.addWidget(QLabel(' 标题缩放:'))
+        self.company_scale_spin = QDoubleSpinBox()
+        self.company_scale_spin.setRange(0.6, 1.2)
+        self.company_scale_spin.setSingleStep(0.01)
+        self.company_scale_spin.setValue(0.95)
+        self.company_scale_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.company_scale_spin)
+        # 正文字号缩放系数（内容字号）
+        paper_layout.addWidget(QLabel(' 内容字号:'))
+        self.content_font_spin = QDoubleSpinBox()
+        self.content_font_spin.setRange(0.7, 1.3)
+        self.content_font_spin.setSingleStep(0.01)
+        self.content_font_spin.setValue(1.00)
+        self.content_font_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.content_font_spin)
+        self.content_font_spin.valueChanged.connect(self._save_user_settings)
+        # 绑定保存设置的信号（在每次改动时保存）
+        self.top_offset_spin.valueChanged.connect(self._save_user_settings)
+        self.company_scale_spin.valueChanged.connect(self._save_user_settings)
+        # 左右安全边距（mm）
+        paper_layout.addWidget(QLabel(' 左边距(mm):'))
+        self.left_margin_spin = QDoubleSpinBox()
+        self.left_margin_spin.setRange(0.0, 20.0)
+        self.left_margin_spin.setSingleStep(0.5)
+        self.left_margin_spin.setValue(4.0)
+        self.left_margin_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.left_margin_spin)
+        self.left_margin_spin.valueChanged.connect(self._save_user_settings)
+
+        paper_layout.addWidget(QLabel(' 右边距(mm):'))
+        self.right_margin_spin = QDoubleSpinBox()
+        self.right_margin_spin.setRange(0.0, 20.0)
+        self.right_margin_spin.setSingleStep(0.5)
+        self.right_margin_spin.setValue(8.0)
+        self.right_margin_spin.valueChanged.connect(lambda _: self.load_receipt())
+        paper_layout.addWidget(self.right_margin_spin)
+        self.right_margin_spin.valueChanged.connect(self._save_user_settings)
         paper_layout.addStretch()
         layout.addLayout(paper_layout)
         
@@ -105,13 +159,109 @@ class ReceiptDialog(QDialog):
                 QMessageBox.warning(self, '提示', '缴费记录不存在')
                 self.reject()
                 return
-            
-            # 生成收据 HTML 预览（与打印样式一致）
+
+            # 生成与导出一致的图片预览（渲染为 PNG 再显示），保证 UI 与导出文件内容一致
+            try:
+                import tempfile, os
+                tmp_dir = tempfile.gettempdir()
+                tmp_png = os.path.join(tmp_dir, f"receipt_preview_{self.payment_id}.png")
+                paper_size = self.paper_size_combo.currentText()
+                top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+                comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+                from utils.printer import ReceiptPrinter
+                left_margin = float(getattr(self, 'left_margin_spin', None).value()) if getattr(self, 'left_margin_spin', None) else 4.0
+                right_margin = float(getattr(self, 'right_margin_spin', None).value()) if getattr(self, 'right_margin_spin', None) else 8.0
+                content_scale = float(getattr(self, 'content_font_spin', None).value()) if getattr(self, 'content_font_spin', None) else 1.0
+                printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, content_font_scale=content_scale, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
+                # 预览使用 300dpi 输出与导出匹配像素比，UI 会缩放显示
+                ok = printer.render_receipt_to_image(self.payment_id, tmp_png, dpi=300)
+                if ok and os.path.exists(tmp_png):
+                    pix = QPixmap(tmp_png)
+                    if not pix.isNull():
+                        # 将图片按滚动视口宽度缩放以便预览，但保持比例
+                        vw = self.receipt_scroll.viewport().width() or 800
+                        scaled = pix.scaledToWidth(vw - 20, Qt.SmoothTransformation)
+                        self.receipt_preview_label.setPixmap(scaled)
+                        self.receipt_preview_label.resize(scaled.size())
+                        return
+            except Exception:
+                # 渲染失败则回退到 HTML 预览（保持原有体验）
+                pass
+
+            # 回退：生成 HTML 预览（当图片渲染不可用时）
             receipt_html = self.generate_receipt_html(payment)
-            self.receipt_preview.setHtml(receipt_html)
+            # 如果回退为 HTML，需要把 label 显示 HTML（转换为 QPixmap via QTextDocument）
+            try:
+                from PyQt5.QtGui import QTextDocument
+                doc = QTextDocument()
+                doc.setHtml(receipt_html)
+                img = QPixmap(doc.size().toSize())
+                img.fill(Qt.white)
+                painter = QPainter(img)
+                doc.drawContents(painter)
+                painter.end()
+                self.receipt_preview_label.setPixmap(img)
+                self.receipt_preview_label.resize(img.size())
+            except Exception:
+                # 最后回退：直接把 HTML 放到文本框样式字符串显示为简单文本
+                self.receipt_preview_label.setText(receipt_html)
         except Exception as e:
             QMessageBox.critical(self, '错误', f'加载收据失败：{str(e)}')
             self.reject()
+
+    def _settings_file(self) -> Path:
+        """返回用于保存用户打印配置的文件路径"""
+        home = Path.home()
+        cfg = home / '.property_manager_settings.json'
+        return cfg
+
+    def _load_user_settings(self):
+        """从文件加载用户设置并应用到控件"""
+        cfg = self._settings_file()
+        if not cfg.exists():
+            return
+        try:
+            data = json.loads(cfg.read_text(encoding='utf-8'))
+        except Exception:
+            return
+        # 应用已保存值（若存在）
+        try:
+            if 'top_offset_mm' in data:
+                self.top_offset_spin.setValue(float(data.get('top_offset_mm', self.top_offset_spin.value())))
+            if 'company_font_scale_adj' in data:
+                self.company_scale_spin.setValue(float(data.get('company_font_scale_adj', self.company_scale_spin.value())))
+                if 'content_font_scale' in data:
+                    try:
+                        self.content_font_spin.setValue(float(data.get('content_font_scale', self.content_font_spin.value())))
+                    except Exception:
+                        pass
+            if 'left_margin_mm' in data:
+                self.left_margin_spin.setValue(float(data.get('left_margin_mm', self.left_margin_spin.value())))
+            if 'right_margin_mm' in data:
+                self.right_margin_spin.setValue(float(data.get('right_margin_mm', self.right_margin_spin.value())))
+        except Exception:
+            pass
+
+    def _save_user_settings(self):
+        """将当前控件值保存到用户配置文件（即时保存）"""
+        cfg = self._settings_file()
+        try:
+            cur = {}
+            if cfg.exists():
+                try:
+                    cur = json.loads(cfg.read_text(encoding='utf-8')) or {}
+                except Exception:
+                    cur = {}
+            cur.update({
+                'top_offset_mm': float(self.top_offset_spin.value()),
+                'company_font_scale_adj': float(self.company_scale_spin.value()),
+                'content_font_scale': float(self.content_font_spin.value()),
+                'left_margin_mm': float(self.left_margin_spin.value()),
+                'right_margin_mm': float(self.right_margin_spin.value()),
+            })
+            cfg.write_text(json.dumps(cur, ensure_ascii=False, indent=2), encoding='utf-8')
+        except Exception:
+            pass
     
     def generate_receipt_text(self, payment):
         """生成收据文本"""
@@ -137,7 +287,11 @@ class ReceiptDialog(QDialog):
         # 计费起止展示
         billing_period = ""
         if payment.billing_start_date and payment.billing_end_date:
-            billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
+            try:
+                end_display = payment.billing_end_date - timedelta(days=1)
+            except Exception:
+                end_display = payment.billing_end_date
+            billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
         # 使用最近一笔流水（如果存在）来显示“本次实收”周期与金额；否则回退到累计显示
         paid_period = ""
         paid_amount_display = ""
@@ -166,7 +320,11 @@ class ReceiptDialog(QDialog):
                 prev_paid = max(0, total_paid - months_in_tx)
                 start_tx = add_months(payment.billing_start_date, prev_paid)
                 end_tx = add_months(start_tx, months_in_tx)
-                paid_period = f"{start_tx.strftime('%Y.%m.%d')}–{end_tx.strftime('%Y.%m.%d')}"
+                try:
+                    end_tx_display = end_tx - timedelta(days=1)
+                except Exception:
+                    end_tx_display = end_tx
+                paid_period = f"{start_tx.strftime('%Y.%m.%d')}–{end_tx_display.strftime('%Y.%m.%d')}"
                 paid_amount_display = self._fmt_amount_two_decimals(last_tx.amount)
             else:
                 # 无流水则退回到累计已缴金额显示
@@ -180,19 +338,37 @@ class ReceiptDialog(QDialog):
                         return dt.replace(year=year, month=month, day=day)
                     start = payment.billing_start_date
                     end_paid = add_months(start, int(payment.paid_months))
-                    paid_period = f"{start.strftime('%Y.%m.%d')}–{end_paid.strftime('%Y.%m.%d')}"
+                    try:
+                        end_paid_display = end_paid - timedelta(days=1)
+                    except Exception:
+                        end_paid_display = end_paid
+                    paid_period = f"{start.strftime('%Y.%m.%d')}–{end_paid_display.strftime('%Y.%m.%d')}"
                     paid_amount_display = self._fmt_amount_two_decimals(payment.paid_amount) if payment.paid_amount else ""
         except Exception:
             paid_period = ""
             paid_amount_display = ""
 
-        # 获取纸张设置以调整预览样式
-        curr_paper = self.paper_size_combo.currentText()
-        is_wide = "241" in curr_paper
-        is_narrow = "80" in curr_paper
-        
-        # 默认样式参数 (A4)
-        paper_width = "500px"
+        # 仅支持收据纸 241×93mm（项目统一目标）
+        curr_paper = '收据纸 (241×93mm)'
+        is_wide = True
+        is_narrow = False
+        target_w_mm, target_h_mm = 241.0, 93.0
+
+        # 预览宽度使用预览控件当前可用宽度，保证显示比例与导出图片一致
+        try:
+            preview_widget_width = max(300, self.receipt_preview.viewport().width() - 20)
+        except Exception:
+            preview_widget_width = 500
+        # 计算高度以匹配纸张的长宽比
+        try:
+            preview_height = int(preview_widget_width * (target_h_mm / target_w_mm))
+        except Exception:
+            preview_height = int(preview_widget_width * (93.0 / 241.0)) if is_wide else int(preview_widget_width * (297.0 / 210.0))
+
+        paper_width = f"{preview_widget_width}px"
+        paper_height = f"{preview_height}px"
+
+        # 基础样式值（可随纸张类型调整）
         padding = "30px 40px"
         empty_rows_count = 6
         base_font_size = "14px"
@@ -200,20 +376,17 @@ class ReceiptDialog(QDialog):
         company_size = "22px"
         cell_padding = "8px"
         margin_bottom_divider = "12px"
-        
+
         if is_wide:
             # 宽纸 241x93mm 专属紧凑样式
-            # 比例约为 2.6:1。如果宽 750px，高应约为 290px。包含内容后应自然撑开到此高度。
-            paper_width = "850px" # 增加更多宽度以利用屏幕
-            padding = "15px 20px" # 极小的内边距
-            empty_rows_count = 0  # 无空行
-            base_font_size = "12px" # 更小的基准字体
+            padding = "15px 20px"
+            empty_rows_count = 0
+            base_font_size = "12px"
             title_size = "16px"
             company_size = "18px"
-            cell_padding = "4px" # 表格更紧凑
+            cell_padding = "4px"
             margin_bottom_divider = "5px"
         elif is_narrow:
-            paper_width = "260px"
             padding = "10px 5px"
             empty_rows_count = 2
             base_font_size = "12px"
@@ -284,7 +457,7 @@ th {{ background:#f5f5f5; font-weight:600; }}
 </style>
 </head>
 <body>
-<div class="receipt-paper">
+  <div class="receipt-paper" style="width:{paper_width}; height:{paper_height};">
   <div class="company">{logo_html}四川盛涵物业服务有限公司</div>
   <div class="title">收费收据</div>
   <div class="receipt-no">NO:{payment_date_str}{payment_seq:03d}</div>
@@ -359,7 +532,11 @@ th {{ background:#f5f5f5; font-weight:600; }}
         """打印收据"""
         try:
             paper_size = self.paper_size_combo.currentText()
-            printer = ReceiptPrinter(paper_size=paper_size)
+            top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+            comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+            left_margin = float(getattr(self, 'left_margin_spin', None).value()) if getattr(self, 'left_margin_spin', None) else 4.0
+            right_margin = float(getattr(self, 'right_margin_spin', None).value()) if getattr(self, 'right_margin_spin', None) else 8.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_left_mm=left_margin, safe_margin_right_mm=right_margin)
             if printer.print_receipt(self.payment_id):
                 QMessageBox.information(self, '成功', '打印成功')
             else:
@@ -393,7 +570,10 @@ th {{ background:#f5f5f5; font-weight:600; }}
                 path = path + '.pdf'
 
             paper_size = self.paper_size_combo.currentText()
-            printer = ReceiptPrinter(paper_size=paper_size)
+            top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+            comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+            safe_margin = float(getattr(self, 'safe_margin_spin', None).value()) if getattr(self, 'safe_margin_spin', None) else 8.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale, safe_margin_mm=safe_margin)
             success = printer.print_receipt(self.payment_id, output_file=path)
             if success:
                 QMessageBox.information(self, '成功', f'已保存 PDF：{path}')
@@ -469,7 +649,11 @@ th {{ background:#f5f5f5; font-weight:600; }}
             # 明细行
             billing_period = ""
             if payment.billing_start_date and payment.billing_end_date:
-                billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{payment.billing_end_date.strftime('%Y.%m.%d')}"
+                try:
+                    end_display = payment.billing_end_date - timedelta(days=1)
+                except Exception:
+                    end_display = payment.billing_end_date
+                billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
             detail_row = start_row + 1
             ws.cell(row=detail_row, column=1, value=payment.charge_item.name if payment.charge_item else "")
             ws.cell(row=detail_row, column=2, value=billing_period)
@@ -559,7 +743,9 @@ th {{ background:#f5f5f5; font-weight:600; }}
                 path = path + '.png'
 
             paper_size = self.paper_size_combo.currentText()
-            printer = ReceiptPrinter(paper_size=paper_size)
+            top_offset = float(getattr(self, 'top_offset_spin', None).value()) if getattr(self, 'top_offset_spin', None) else 0.0
+            comp_scale = float(getattr(self, 'company_scale_spin', None).value()) if getattr(self, 'company_scale_spin', None) else 1.0
+            printer = ReceiptPrinter(paper_size=paper_size, top_offset_mm=top_offset, company_font_scale_adj=comp_scale)
             ok = printer.render_receipt_to_image(self.payment_id, path, dpi=300)
             if ok:
                 QMessageBox.information(self, '成功', f'已保存图片：{path}')
