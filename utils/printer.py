@@ -1189,6 +1189,65 @@ class ReceiptPrinter:
             draw.text((40, int(height_px * 0.20)), f"实收周期: {billing_period}", fill='black', font=font_norm)
             draw.text((40, int(height_px * 0.25)), f"实收金额: {getattr(payment, 'paid_amount', getattr(payment, 'amount', ''))}", fill='black', font=font_norm)
 
+            # 简易表格：绘制表头与一行收费项目（使 PIL 渲染与 Qt 渲染的输出更一致）
+            try:
+                # 表格位置与尺寸（相对）
+                table_x = 40
+                table_y = int(height_px * 0.30)
+                table_w = width_px - 2 * table_x
+                row_h = int(height_px * 0.07)
+                # 列宽（项目，起止时间，金额，备注）
+                col_w0 = int(table_w * 0.25)
+                col_w1 = int(table_w * 0.40)
+                col_w2 = int(table_w * 0.20)
+                col_w3 = table_w - (col_w0 + col_w1 + col_w2)
+
+                # 外框
+                draw.rectangle([table_x, table_y, table_x + table_w, table_y + row_h * 2 + 2], outline='black', width=2)
+                # 表头填充
+                draw.rectangle([table_x, table_y, table_x + table_w, table_y + row_h], outline='black', width=1)
+                headers = ["收费项目", "起止时间", "金额（元）", "备注"]
+                hx = table_x
+                for i, h in enumerate(headers):
+                    if i == 0:
+                        w = col_w0
+                    elif i == 1:
+                        w = col_w1
+                    elif i == 2:
+                        w = col_w2
+                    else:
+                        w = col_w3
+                    draw.text((hx + 6, table_y + int(row_h * 0.15)), h, fill='black', font=font_norm)
+                    draw.line([(hx + w, table_y), (hx + w, table_y + row_h * 2 + 2)], fill='black', width=1)
+                    hx += w
+
+                # 明细行（只绘制第一条，确保 always show 项目名）
+                try:
+                    item_name = payment.charge_item.name if getattr(payment, 'charge_item', None) and getattr(payment.charge_item, 'name', None) else "物业费"
+                except Exception:
+                    item_name = "物业费"
+                try:
+                    if getattr(payment, 'billing_start_date', None) and getattr(payment, 'billing_end_date', None):
+                        period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}-{payment.billing_end_date.strftime('%Y.%m.%d')}"
+                    else:
+                        period = billing_period or ""
+                except Exception:
+                    period = billing_period or ""
+                try:
+                    amount_text = f"{float(getattr(payment, 'paid_amount', getattr(payment, 'amount', 0.0))):.2f}"
+                except Exception:
+                    amount_text = str(getattr(payment, 'amount', ''))
+                # 写入明细
+                dx = table_x
+                draw.text((dx + 6, table_y + row_h + int(row_h * 0.15)), item_name, fill='black', font=font_norm)
+                dx += col_w0
+                draw.text((dx + 6, table_y + row_h + int(row_h * 0.15)), period, fill='black', font=font_norm)
+                dx += col_w1
+                draw.text((dx + 6, table_y + row_h + int(row_h * 0.15)), amount_text, fill='black', font=font_norm)
+                # 备注列为空 for now
+            except Exception:
+                pass
+
             # 底部签名位置
             draw.text((40, int(height_px * 0.85)), "收款人:", fill='black', font=font_norm)
             draw.text((width_px // 2 + 40, int(height_px * 0.85)), "收款单位盖章:", fill='black', font=font_norm)
