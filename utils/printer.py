@@ -227,7 +227,31 @@ class ReceiptPrinter:
                 # 先渲染到临时 PNG（使用打印机 DPI，以便像素与物理尺寸一一对应）
                 tmp_dir = tempfile.gettempdir()
                 tmp_png = os.path.join(tmp_dir, f"receipt_tmp_{payment_id}.png")
-                ok_img = self.render_receipt_to_image(payment_id, tmp_png, dpi=dpi, payment_date_str=payment_date_str, payment_seq=payment_seq)
+                # 计算打印机可用宽度（像素）并传入渲染函数，以便生成与打印机可绘制区域匹配的图像
+                try:
+                    page_rect = self.printer.pageRect()
+                    mm_per_inch = 25.4
+                    try:
+                        left_safe_px = int((self.safe_margin_left_mm if self.safe_margin_left_mm is not None else self.safe_margin_mm) / mm_per_inch * dpi)
+                    except Exception:
+                        left_safe_px = int(self.safe_margin_mm / mm_per_inch * dpi)
+                    try:
+                        right_safe_px = int((self.safe_margin_right_mm if self.safe_margin_right_mm is not None else self.safe_margin_mm) / mm_per_inch * dpi)
+                    except Exception:
+                        right_safe_px = int(self.safe_margin_mm / mm_per_inch * dpi)
+                    # 给打印驱动留点缓冲，但不要过大（2% 或至少 10px，限制最大 40px）
+                    driver_pad = int(min(max(int(page_rect.width() * 0.02), 10), 40))
+                    max_available_width = max(0, int(page_rect.width()) - left_safe_px - right_safe_px - driver_pad)
+                    # 在 Windows 环境下对可用宽度做小幅收缩，避免某些驱动对接收到的图像做二次放大/适配导致打印变宽
+                    try:
+                        if sys.platform.startswith('win') and max_available_width:
+                            max_available_width = int(max_available_width * 0.98)
+                    except Exception:
+                        pass
+                except Exception:
+                    max_available_width = None
+
+                ok_img = self.render_receipt_to_image(payment_id, tmp_png, dpi=dpi, payment_date_str=payment_date_str, payment_seq=payment_seq, max_width_px=max_available_width)
                 if not ok_img or not os.path.exists(tmp_png):
                     # 回退：尝试直接使用向量绘制（旧行为）
                     try:
@@ -268,12 +292,13 @@ class ReceiptPrinter:
                             pr = self.printer.pageRect()
                             diag['page_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(pr.width()), 'h': int(pr.height())}
                             # 记录我们用于实际绘制的矩形大小（便于诊断）
-                            try:
-                                effective_w = min(desired_w_px, int(pr.width()))
-                                effective_h = min(desired_h_px, int(pr.height()))
-                                diag['effective_draw_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(effective_w), 'h': int(effective_h)}
-                            except Exception:
-                                diag['effective_draw_rect'] = None
+                        try:
+                            # 使用实际渲染的图片大小与打印机 pageRect 取交集作为有效绘制区域
+                            effective_w = min(image.width(), int(pr.width()))
+                            effective_h = min(image.height(), int(pr.height()))
+                            diag['effective_draw_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(effective_w), 'h': int(effective_h)}
+                        except Exception:
+                            diag['effective_draw_rect'] = None
                         except Exception:
                             diag['page_rect'] = None
                         diag['image_size'] = {'w': image.width(), 'h': image.height()}
@@ -836,7 +861,7 @@ class ReceiptPrinter:
             raise
 
 
-    def render_receipt_to_image(self, payment_id, output_path, dpi=300, payment_date_str: str = None, payment_seq: int = None):
+    def render_receipt_to_image(self, payment_id, output_path, dpi=300, payment_date_str: str = None, payment_seq: int = None, max_width_px: int = None, max_height_px: int = None):
         """将收据渲染为高分辨率 PNG 图像并保存"""
         try:
             payment = PaymentService.get_payment_by_id(payment_id)
@@ -846,14 +871,21 @@ class ReceiptPrinter:
             # 只使用目标收据纸尺寸（241×93mm）
             w_mm, h_mm = self._target_w_mm, self._target_h_mm
 
-            # 转换为像素（默认根据 dpi 计算）
+            # 转换为像素（默认根据 dpi 计算），但允许调用方传入 max_width_px/max_height_px 以匹配打印机可绘制区域
             mm_per_inch = 25.4
             width_px = int(w_mm / mm_per_inch * dpi)
             height_px = int(h_mm / mm_per_inch * dpi)
-            # 特殊处理：当目标为针式宽纸（241×93mm）并且使用 300dpi 时，强制使用精确像素以匹配实际打印测试要求（2847×1098）
-            if int(dpi) == 300:
-                width_px = 2847
-                height_px = 1098
+            # 如果调用方提供了 max_width_px（例如打印时基于 printer.pageRect 计算的可用像素宽度），优先使用它并按纸张纵横比计算高度（除非同时提供 max_height_px）
+            if max_width_px is not None:
+                try:
+                    width_px = int(max_width_px)
+                    if max_height_px is not None:
+                        height_px = int(max_height_px)
+                    else:
+                        # 保持纸张纵横比
+                        height_px = int(width_px * (h_mm / w_mm))
+                except Exception:
+                    pass
             
             image = QImage(width_px, height_px, QImage.Format_ARGB32)
             image.fill(Qt.white)
@@ -1327,7 +1359,9 @@ class ReceiptPrinter:
             raise
 
     def render_merged_receipt_to_image(self, payments, output_path, dpi=300):
-        """将合并收据渲染为 PNG（payments 为 payment 对象列表）"""
+        """将合并收据渲染为 PNG（payments 为 payment 对象列表）
+        支持在调用时传入打印机可绘制宽度（通过 dpi 与 pageRect 计算并传递为 max_width_px），以保证渲染图片与打印机可绘制区域一致。
+        """
         try:
             # 仅支持目标收据纸（241×93mm）
             w_mm, h_mm = self._target_w_mm, self._target_h_mm
@@ -1335,9 +1369,7 @@ class ReceiptPrinter:
             width_px = int(w_mm / mm_per_inch * dpi)
             height_px = int(h_mm / mm_per_inch * dpi)
             # 如果是宽纸且使用 300dpi，使用精确像素匹配物理打印测试（2847×1098）
-            if self.paper_size == '收据纸 (241×93mm)' and int(dpi) == 300:
-                width_px = 2847
-                height_px = 1098
+            # 注意：不要对 dpi==300 做硬编码像素覆盖，调用者应传入 max_width_px 以匹配打印机可绘制区域
             # 计算顶部偏移与安全边距（像素）
             try:
                 self._top_offset_px = int(self.top_offset_mm / mm_per_inch * dpi)
