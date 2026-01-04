@@ -292,13 +292,13 @@ class ReceiptPrinter:
                             pr = self.printer.pageRect()
                             diag['page_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(pr.width()), 'h': int(pr.height())}
                             # 记录我们用于实际绘制的矩形大小（便于诊断）
-                        try:
-                            # 使用实际渲染的图片大小与打印机 pageRect 取交集作为有效绘制区域
-                            effective_w = min(image.width(), int(pr.width()))
-                            effective_h = min(image.height(), int(pr.height()))
-                            diag['effective_draw_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(effective_w), 'h': int(effective_h)}
-                        except Exception:
-                            diag['effective_draw_rect'] = None
+                            try:
+                                # 使用实际渲染的图片大小与打印机 pageRect 取交集作为有效绘制区域
+                                effective_w = min(image.width(), int(pr.width()))
+                                effective_h = min(image.height(), int(pr.height()))
+                                diag['effective_draw_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(effective_w), 'h': int(effective_h)}
+                            except Exception:
+                                diag['effective_draw_rect'] = None
                         except Exception:
                             diag['page_rect'] = None
                         diag['image_size'] = {'w': image.width(), 'h': image.height()}
