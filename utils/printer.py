@@ -738,6 +738,32 @@ class ReceiptPrinter:
                 max_rows = 8
 
             num_rows = min(max_rows, len(details)) if details else 0
+
+            # 如果没有明细行但存在金额，补一行默认明细以保证“物业费”等关键行不丢失
+            if num_rows == 0:
+                try:
+                    # 尝试构造默认明细行：优先使用 charge_item.name，否则使用“物业费”
+                    default_name = payment.charge_item.name if getattr(payment, 'charge_item', None) and getattr(payment.charge_item, 'name', None) else "物业费"
+                except Exception:
+                    default_name = "物业费"
+                try:
+                    amt_int = int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP)) if getattr(payment, 'amount', None) is not None else 0
+                    amount_text_def = f"{amt_int:.2f}"
+                except Exception:
+                    try:
+                        amt_int = int(round(float(getattr(payment, 'amount', 0))))
+                        amount_text_def = f"{amt_int:.2f}"
+                    except Exception:
+                        amount_text_def = str(getattr(payment, 'amount', ""))
+                # 试着重建 billing_period
+                try:
+                    if payment.billing_start_date and payment.billing_end_date:
+                        end_display = (payment.billing_end_date - timedelta(days=1))
+                        billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
+                except Exception:
+                    billing_period = ""
+                details = [(default_name, billing_period, amount_text_def)]
+                num_rows = 1
             note_rows = 1
             total_table_rows = 1 + num_rows + 1 + note_rows
             table_height = total_table_rows * row_height
