@@ -118,6 +118,11 @@ class ReceiptPrinter:
                     self.printer.setOutputFileName(output_file)
                     # 将图片绘制到打印机页面
                     painter = QPainter()
+                    # PDF 输出路径：优先使用打印机报告的分辨率（通常已被设置为 300）
+                    try:
+                        self._render_dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else 300
+                    except Exception:
+                        self._render_dpi = 300
                     if not painter.begin(self.printer):
                         # 清理临时文件
                         try:
@@ -267,6 +272,13 @@ class ReceiptPrinter:
                         self._safe_margin_left_px = 0
                         self._safe_margin_right_px = 0
                     painter = QPainter()
+                    try:
+                        self._render_dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else dpi
+                    except Exception:
+                        try:
+                            self._render_dpi = int(dpi)
+                        except Exception:
+                            self._render_dpi = 300
                     painter.begin(self.printer)
                     page_rect = self.printer.pageRect()
                     self._draw_receipt(painter, page_rect, payment, payment_date_str=payment_date_str, payment_seq=payment_seq)
@@ -275,6 +287,13 @@ class ReceiptPrinter:
 
                 # 使用图片绘制到打印机页面（按目标物理宽度缩放并水平居中）
                 painter = QPainter()
+                try:
+                    self._render_dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else dpi
+                except Exception:
+                    try:
+                        self._render_dpi = int(dpi)
+                    except Exception:
+                        self._render_dpi = 300
                 if not painter.begin(self.printer):
                     try:
                         if os.path.exists(tmp_png):
@@ -507,6 +526,15 @@ class ReceiptPrinter:
             margin_left = max(base_margin, left_safe_px)
             margin_right = max(base_margin, right_safe_px)
             content_width = width - margin_left - margin_right
+            # 全局缩小表格宽度 10mm（转换为当前渲染 DPI 的像素）
+            try:
+                mm_per_inch = 25.4
+                dpi_for_render = int(getattr(self, '_render_dpi', 300))
+                reduce_px = int(10 / mm_per_inch * dpi_for_render)
+                if reduce_px > 0:
+                    content_width = max(0, content_width - reduce_px)
+            except Exception:
+                pass
             # 应用顶部像素偏移（render/print 路径会提前将 self.top_offset_mm 转换为 self._top_offset_px）
             try:
                 top_offset_px = int(getattr(self, '_top_offset_px', 0))
@@ -1043,6 +1071,10 @@ class ReceiptPrinter:
                     pass
                 self.printer.setOutputFileName(output_file)
                 painter = QPainter()
+                try:
+                    self._render_dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else 300
+                except Exception:
+                    self._render_dpi = 300
                 if not painter.begin(self.printer):
                     try:
                         if os.path.exists(tmp_png):
@@ -1093,6 +1125,13 @@ class ReceiptPrinter:
                 self._safe_margin_px = 0
 
             painter = QPainter()
+            try:
+                self._render_dpi = int(self.printer.resolution()) if hasattr(self.printer, 'resolution') else dpi
+            except Exception:
+                try:
+                    self._render_dpi = int(dpi)
+                except Exception:
+                    self._render_dpi = 300
             painter.begin(self.printer)
             page_rect = self.printer.pageRect()
             self._draw_merged_receipt(painter, page_rect, payments)
@@ -1168,6 +1207,15 @@ class ReceiptPrinter:
             margin_left = max(base_margin, left_safe_px)
             margin_right = max(base_margin, right_safe_px)
             content_width = width - margin_left - margin_right
+            # 全局缩小表格宽度 10mm（转换为当前渲染 DPI 的像素）
+            try:
+                mm_per_inch = 25.4
+                dpi_for_render = int(getattr(self, '_render_dpi', 300))
+                reduce_px = int(10 / mm_per_inch * dpi_for_render)
+                if reduce_px > 0:
+                    content_width = max(0, content_width - reduce_px)
+            except Exception:
+                pass
             try:
                 top_offset_px = int(getattr(self, '_top_offset_px', 0))
                 y = max(0, base_margin - top_offset_px)
