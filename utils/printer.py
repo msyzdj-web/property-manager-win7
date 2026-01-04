@@ -133,6 +133,11 @@ class ReceiptPrinter:
                         return False
                     try:
                         image = QImage(tmp_png)
+                        # 写诊断：打印前的 image 大小与 payment 信息（PDF 输出路径）
+                        try:
+                            self._write_runtime_diag(payment, payment_id=payment_id, extra={'stage': 'pdf_draw_image_pre', 'dpi': 300}, image_size={'w': image.width(), 'h': image.height()})
+                        except Exception:
+                            pass
                         
                         # 获取页面绘制区域
                         page_rect = self.printer.pageRect()
@@ -457,11 +462,111 @@ class ReceiptPrinter:
                 frac_part += nums[fen] + "分"
         return int_part + frac_part
 
+    def _write_runtime_diag(self, payment, payment_id=None, extra: dict = None, image_size: dict = None):
+        """写入运行时诊断到 exports/print_diag_{payment_id}.json 用于定位 CI/环境差异"""
+        try:
+            diag = {}
+            import time
+            diag['timestamp'] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+            diag['platform'] = sys.platform
+            # payment summary
+            try:
+                if hasattr(payment, 'to_dict'):
+                    diag['payment'] = payment.to_dict()
+                else:
+                    diag['payment'] = {
+                        'id': getattr(payment, 'id', None),
+                        'charge_item_id': getattr(payment, 'charge_item_id', None),
+                        'amount': float(getattr(payment, 'amount', 0) or 0),
+                        'paid_amount': float(getattr(payment, 'paid_amount', 0) or 0)
+                    }
+            except Exception:
+                diag['payment'] = {'id': getattr(payment, 'id', None)}
+            # charge_item quick info
+            try:
+                ci = getattr(payment, 'charge_item', None)
+                if ci is not None:
+                    diag['charge_item'] = {'id': getattr(ci, 'id', None), 'name': getattr(ci, 'name', None)}
+                else:
+                    diag['charge_item'] = None
+            except Exception:
+                diag['charge_item'] = None
+
+            # details: try to build similar to _draw_receipt logic
+            try:
+                details = []
+                item_name = getattr(payment, 'charge_item', None).name if getattr(payment, 'charge_item', None) else ""
+                billing_period = ""
+                try:
+                    if getattr(payment, 'billing_start_date', None) and getattr(payment, 'billing_end_date', None):
+                        end_display = (payment.billing_end_date - timedelta(days=1))
+                        billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
+                except Exception:
+                    billing_period = ""
+                try:
+                    amt_int = int(Decimal(str(getattr(payment, 'amount', 0))).quantize(0, rounding=ROUND_HALF_UP)) if getattr(payment, 'amount', None) is not None else 0
+                    amount_text = f"{amt_int:.2f}"
+                except Exception:
+                    try:
+                        amt_int = int(round(float(getattr(payment, 'amount', 0) or 0)))
+                        amount_text = f"{amt_int:.2f}"
+                    except Exception:
+                        amount_text = str(getattr(payment, 'amount', ''))
+                if (item_name and item_name.strip()) or (billing_period and billing_period.strip()) or (amount_text and amount_text.strip()):
+                    details.append((item_name, billing_period, amount_text))
+                diag['details'] = details
+            except Exception:
+                diag['details'] = None
+
+            # target and image info
+            try:
+                diag['target_mm'] = {'w_mm': float(self._target_w_mm), 'h_mm': float(self._target_h_mm)}
+            except Exception:
+                diag['target_mm'] = None
+            try:
+                pr = self.printer.pageRect()
+                diag['page_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(pr.width()), 'h': int(pr.height())}
+            except Exception:
+                diag['page_rect'] = None
+            if image_size:
+                diag['image_size'] = image_size
+            if extra:
+                diag['extra'] = extra
+
+            exports_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'exports'))
+            try:
+                os.makedirs(exports_dir, exist_ok=True)
+            except Exception:
+                pass
+            pid = payment_id or getattr(payment, 'id', 'unknown')
+            diag_path = os.path.join(exports_dir, f'print_diag_{pid}.json')
+            try:
+                import json as _json
+                with open(diag_path, 'w', encoding='utf-8') as f:
+                    _json.dump(diag, f, ensure_ascii=False, indent=2)
+            except Exception:
+                pass
+            return True
+        except Exception:
+            return False
+
     def _draw_receipt(self, painter: QPainter, page_rect: QRect, payment, payment_date_str: str = None, payment_seq: int = None):
         """在给定 painter 和页面矩形上绘制收据（不负责 begin/end）"""
         try:
             width = page_rect.width()
             height = page_rect.height()
+            # 如果 payment 关联的 charge_item 为空，尝试从 DB 重新加载以避免打包/session 导致的懒加载问题
+            try:
+                if getattr(payment, 'charge_item', None) is None and getattr(payment, 'charge_item_id', None):
+                    try:
+                        from services.charge_service import ChargeService
+                        ci = ChargeService.get_charge_item_by_id(getattr(payment, 'charge_item_id'))
+                        if ci:
+                            payment.charge_item = ci
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             
             # 项目目标：仅支持 241×93mm（宽纸），将所有绘制逻辑视为宽纸模式
             is_narrow_paper = False
@@ -738,6 +843,32 @@ class ReceiptPrinter:
                 max_rows = 8
 
             num_rows = min(max_rows, len(details)) if details else 0
+
+            # 如果没有明细行但存在金额，补一行默认明细以保证“物业费”等关键行不丢失
+            if num_rows == 0:
+                try:
+                    # 尝试构造默认明细行：优先使用 charge_item.name，否则使用“物业费”
+                    default_name = payment.charge_item.name if getattr(payment, 'charge_item', None) and getattr(payment.charge_item, 'name', None) else "物业费"
+                except Exception:
+                    default_name = "物业费"
+                try:
+                    amt_int = int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP)) if getattr(payment, 'amount', None) is not None else 0
+                    amount_text_def = f"{amt_int:.2f}"
+                except Exception:
+                    try:
+                        amt_int = int(round(float(getattr(payment, 'amount', 0))))
+                        amount_text_def = f"{amt_int:.2f}"
+                    except Exception:
+                        amount_text_def = str(getattr(payment, 'amount', ""))
+                # 试着重建 billing_period
+                try:
+                    if payment.billing_start_date and payment.billing_end_date:
+                        end_display = (payment.billing_end_date - timedelta(days=1))
+                        billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
+                except Exception:
+                    billing_period = ""
+                details = [(default_name, billing_period, amount_text_def)]
+                num_rows = 1
             note_rows = 1
             total_table_rows = 1 + num_rows + 1 + note_rows
             table_height = total_table_rows * row_height
@@ -1113,6 +1244,13 @@ class ReceiptPrinter:
                     return False
                 try:
                     image = QImage(tmp_png)
+                    # 写诊断：合并打印的 PDF 输出路径，记录 image size 与 payments 简要信息
+                    try:
+                        # for merged receipts, payment_id not single; write with 'merged' prefix and first payment id
+                        first_pid = payments[0].id if payments and getattr(payments[0], 'id', None) else 'merged'
+                        self._write_runtime_diag(payments[0], payment_id=f"merged_{first_pid}", extra={'stage': 'merged_pdf_draw_image_pre', 'dpi': 300}, image_size={'w': image.width(), 'h': image.height()})
+                    except Exception:
+                        pass
                     page_rect = self.printer.pageRect()
                     rect = QRect(int(page_rect.x()), int(page_rect.y()), int(page_rect.width()), int(page_rect.height()))
                     

@@ -120,3 +120,64 @@ jobs:
           name: build-logs
           path: build/
 
+      - name: Generate sample receipt and runtime diag (CI)
+        if: always()
+        shell: pwsh
+        run: |
+          $script = @'
+from datetime import datetime, timedelta
+import os
+try:
+    # Minimal fake payment/resident/charge objects to render a sample receipt without DB
+    class FakeResident:
+        def __init__(self):
+            self.name = "测试户"
+            self.room_no = "1-1-101"
+            self.full_room_no = self.room_no
+
+    class FakeCharge:
+        def __init__(self):
+            self.id = 1
+            self.name = "物业费"
+
+    class FakePayment:
+        def __init__(self):
+            self.id = 1
+            self.resident = FakeResident()
+            self.charge_item = FakeCharge()
+            self.charge_item_id = 1
+            self.amount = 1616.00
+            self.paid_amount = 1616.00
+            self.billing_start_date = datetime(2025,11,16)
+            self.billing_end_date = datetime(2026,11,15)
+            self.billing_months = 12
+            self.paid_months = 12
+            self.created_at = datetime.now()
+
+    os.makedirs('exports', exist_ok=True)
+    from utils.printer import ReceiptPrinter
+    rp = ReceiptPrinter(paper_size='收据纸 (241×93mm)', top_offset_mm=3.0, company_font_scale_adj=0.95, content_font_scale=1.0)
+    p = FakePayment()
+    # Render using PIL fallback to avoid requiring full Qt GUI in CI
+    rp._render_receipt_to_image_pil(p, 'exports/receipt_ci_000001.png', dpi=180, payment_date_str=None, payment_seq=1)
+    try:
+        rp._write_runtime_diag(p, payment_id=p.id, image_size={'w':241,'h':93})
+    except Exception:
+        pass
+    print('CI sample receipt generated')
+except Exception as e:
+    print('Failed to generate CI sample receipt:', e)
+    raise
+'@
+          $tmp = Join-Path $env:RUNNER_TEMP 'ci_gen_receipt.py'
+          Set-Content -Path $tmp -Value $script -Encoding UTF8
+          python $tmp
+
+      - name: Upload CI exports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-exports
+          path: exports/
+          retention-days: 7
+
