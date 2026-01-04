@@ -700,6 +700,35 @@ class ReceiptPrinter:
                 # 如果读取字段失败，保持 details 为空以避免占位行
                 details = []
 
+            # 如果没有明细行，但存在金额，则插入默认一行（保留原有打印样式）
+            try:
+                if not details and (getattr(payment, 'amount', None) is not None):
+                    default_name = ""
+                    try:
+                        default_name = payment.charge_item.name if payment.charge_item and getattr(payment.charge_item, 'name', None) else "物业费"
+                    except Exception:
+                        default_name = "物业费"
+                    try:
+                        amt_int = int(Decimal(str(payment.amount)).quantize(0, rounding=ROUND_HALF_UP))
+                        amount_text_def = f"{amt_int:.2f}"
+                    except Exception:
+                        try:
+                            amt_int = int(round(float(payment.amount)))
+                            amount_text_def = f"{amt_int:.2f}"
+                        except Exception:
+                            amount_text_def = str(payment.amount)
+                    # billing_period 如果有则使用之前计算的值，否则尝试重建
+                    if not billing_period:
+                        try:
+                            if payment.billing_start_date and payment.billing_end_date:
+                                end_display = (payment.billing_end_date - timedelta(days=1))
+                                billing_period = f"{payment.billing_start_date.strftime('%Y.%m.%d')}–{end_display.strftime('%Y.%m.%d')}"
+                        except Exception:
+                            billing_period = ""
+                    details.append((default_name, billing_period, amount_text_def))
+            except Exception:
+                pass
+
             # 限制最大显示行数以适配纸张类型（避免过长）
             if is_narrow_paper:
                 max_rows = 4
