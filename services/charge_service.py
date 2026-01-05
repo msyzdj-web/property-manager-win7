@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from models.charge_item import ChargeItem
 from models.database import SessionLocal
 from decimal import Decimal, ROUND_HALF_UP
+import math
 
 
 class ChargeService:
@@ -168,6 +169,22 @@ class ChargeService:
                     val = price * max(1, months // 12)
                     return _round_to_int(val)
             else:
+                # 小时/度等扩展支持
+                if '小时' in unit or '时' in unit:
+                    # 按小时计费，需要起止时间（精确到小时）
+                    if billing_start_date and billing_end_date:
+                        seconds = (billing_end_date - billing_start_date).total_seconds()
+                        hours = max(1, math.ceil(seconds / 3600.0))
+                        val = price * hours
+                        return _round_to_int(val)
+                    else:
+                        val = price * 1
+                        return _round_to_int(val)
+                if '度' in unit:
+                    # 用于按用量计费（如电表度数）。当前无用量参数，退回到按月计费的行为；
+                    # 使用时可改为手动输入金额或扩展 API 传入用量。
+                    val = price * months
+                    return _round_to_int(val)
                 # 默认按月
                 val = price * months
                 return _round_to_int(val)

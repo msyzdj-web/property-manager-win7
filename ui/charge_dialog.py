@@ -58,7 +58,7 @@ class ChargeDialog(QDialog):
         unit_layout.addWidget(QLabel('单位*:'))
         self.unit_combo = QComboBox()
         self.unit_combo.setEditable(True)
-        self.unit_combo.addItems(['元/月', '元/年', '元/平方米', '元/平方米·月', '元'])
+        self.unit_combo.addItems(['元/月', '元/年', '元/天', '元/小时', '元/度', '元/平方米', '元/平方米·月', '元'])
         unit_layout.addWidget(self.unit_combo)
         layout.addLayout(unit_layout)
         
