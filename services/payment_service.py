@@ -301,17 +301,16 @@ class PaymentService:
             # 搜索关键词
             # 支持输入格式： "building-unit-room" 或 "unit-room" 或普通关键字
             import re
-            m = re.match(r'^\s*(\d+)\s*[-\s]+(\d+)\s*[-\s]+(\d+)\s*$', keyword)
-            m2 = re.match(r'^\s*(\d+)\s*[-\s]+(\d+)\s*$', keyword)
-            if m:
-                b, u, rno = m.groups()
+            parts = re.findall(r'\d+', keyword)
+            if len(parts) == 3:
+                b, u, rno = parts
                 query = query.join(Resident).join(ChargeItem).filter(
                     (Resident.building == str(b)) &
                     (Resident.unit == str(u)) &
                     (Resident.room_no.like(f"%{rno}%"))
                 )
-            elif m2:
-                a, b = m2.groups()
+            elif len(parts) == 2:
+                a, b = parts
                 # treat as unit-room or building-room depending on data; try both
                 query = query.join(Resident).join(ChargeItem).filter(
                     ((Resident.unit == str(a)) & (Resident.room_no.like(f"%{b}%"))) |

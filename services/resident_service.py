@@ -217,17 +217,16 @@ class ResidentService:
             db = SessionLocal()
         try:
             import re
-            m = re.match(r'^\s*(\d+)\s*[-\s]+(\d+)\s*[-\s]+(\d+)\s*$', keyword)
-            m2 = re.match(r'^\s*(\d+)\s*[-\s]+(\d+)\s*$', keyword)
-            if m:
-                b, u, rno = m.groups()
+            parts = re.findall(r'\d+', keyword)
+            if len(parts) == 3:
+                b, u, rno = parts
                 return db.query(Resident).filter(
                     (Resident.building == str(b)) &
                     (Resident.unit == str(u)) &
                     (Resident.room_no.like(f"%{rno}%"))
                 ).order_by(Resident.room_no).all()
-            elif m2:
-                a, b = m2.groups()
+            elif len(parts) == 2:
+                a, b = parts
                 return db.query(Resident).filter(
                     ((Resident.unit == str(a)) & (Resident.room_no.like(f"%{b}%"))) |
                     ((Resident.building == str(a)) & (Resident.room_no.like(f"%{b}%"))) |
