@@ -28,6 +28,21 @@ def init_db():
     from models.payment_transaction import PaymentTransaction
     
     Base.metadata.create_all(bind=engine)
+    # Ensure new columns exist for migrations (SQLite simple ADD COLUMN)
+    try:
+        conn = engine.connect()
+        try:
+            # Check if 'usage' column exists in payments table
+            res = conn.execute("PRAGMA table_info('payments')").fetchall()
+            col_names = [r[1] for r in res] if res else []
+            if 'usage' not in col_names:
+                # Add usage column (nullable)
+                conn.execute("ALTER TABLE payments ADD COLUMN usage NUMERIC(10,2)")
+        finally:
+            conn.close()
+    except Exception:
+        # Migration best-effort: if it fails, continue; errors will surface at runtime when accessing the column
+        pass
 
 
 def get_db():
