@@ -22,6 +22,8 @@ class Payment(Base):
     paid_amount = Column(Numeric(10, 2), default=0, comment='已缴费金额')
     paid = Column(Integer, default=0, comment='缴费状态：1-已缴费，0-未缴费')
     paid_time = Column(DateTime, comment='缴费时间')
+    # 用量（例如度数、电量、停车小时数等），可选
+    usage = Column(Numeric(10, 2), nullable=True, comment='用量，按收费项目单位含义解释')
     operator = Column(String(50), comment='操作员')
     created_at = Column(DateTime, default=func.now(), comment='创建时间')
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now(), comment='更新时间')
@@ -50,6 +52,7 @@ class Payment(Base):
             'paid_months': self.paid_months,
             'amount': float(self.amount),
             'paid_amount': float(self.paid_amount) if self.paid_amount else 0.0,
+            'usage': float(self.usage) if getattr(self, 'usage', None) is not None else None,
             'paid': self.paid,
             'paid_status': '已缴费' if self.paid == 1 else f'部分缴费({self.paid_months}/{self.billing_months}月)' if self.paid_months > 0 else '未缴费',
             'paid_time': self.paid_time.strftime('%Y-%m-%d %H:%M:%S') if self.paid_time else '',

@@ -126,7 +126,7 @@ class ChargeService:
     @staticmethod
     def calculate_amount(charge_item: ChargeItem, resident_area: float = 0.0, 
                         months: int = 1, manual_amount: float = 0.0,
-                        billing_start_date=None, billing_end_date=None):
+                        billing_start_date=None, billing_end_date=None, usage: float = None):
         """计算费用金额
         
         Args:
@@ -181,10 +181,14 @@ class ChargeService:
                         val = price * 1
                         return _round_to_int(val)
                 if '度' in unit:
-                    # 用于按用量计费（如电表度数）。当前无用量参数，退回到按月计费的行为；
-                    # 使用时可改为手动输入金额或扩展 API 传入用量。
-                    val = price * months
-                    return _round_to_int(val)
+                    # 用于按用量计费（如电表度数）。
+                    # 若传入 usage（用量），按用量计费；否则退回到按月计费的行为（或需要手动输入）。
+                    if usage is not None:
+                        val = price * float(usage)
+                        return _round_to_int(val)
+                    else:
+                        val = price * months
+                        return _round_to_int(val)
                 # 默认按月
                 val = price * months
                 return _round_to_int(val)

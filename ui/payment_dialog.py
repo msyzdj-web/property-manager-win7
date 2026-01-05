@@ -3,8 +3,8 @@
 """
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QMessageBox, QComboBox, QDoubleSpinBox,
-                             QDateEdit, QGroupBox, QSpinBox, QCompleter)
-from PyQt5.QtCore import Qt, QDate
+                             QDateTimeEdit, QGroupBox, QSpinBox, QCompleter)
+from PyQt5.QtCore import Qt, QDateTime
 from datetime import datetime, timedelta
 
 from services.resident_service import ResidentService
@@ -60,25 +60,25 @@ class PaymentDialog(QDialog):
         billing_group = QGroupBox('计费周期')
         billing_layout = QVBoxLayout(billing_group)
         
-        # 计费开始日期
+        # 计费开始日期（含时间）
         start_layout = QHBoxLayout()
         start_layout.addWidget(QLabel('计费开始日期*:'))
-        self.billing_start_date = QDateEdit()
+        self.billing_start_date = QDateTimeEdit()
         self.billing_start_date.setCalendarPopup(True)
-        self.billing_start_date.setDate(QDate.currentDate())
-        self.billing_start_date.setDisplayFormat('yyyy-MM-dd')
-        self.billing_start_date.dateChanged.connect(self.on_billing_date_changed)
+        self.billing_start_date.setDateTime(QDateTime.currentDateTime())
+        self.billing_start_date.setDisplayFormat('yyyy-MM-dd HH:mm')
+        self.billing_start_date.dateTimeChanged.connect(self.on_billing_date_changed)
         start_layout.addWidget(self.billing_start_date)
         billing_layout.addLayout(start_layout)
         
         # 计费结束日期
         end_layout = QHBoxLayout()
         end_layout.addWidget(QLabel('计费结束日期*:'))
-        self.billing_end_date = QDateEdit()
+        self.billing_end_date = QDateTimeEdit()
         self.billing_end_date.setCalendarPopup(True)
-        self.billing_end_date.setDate(QDate.currentDate())
-        self.billing_end_date.setDisplayFormat('yyyy-MM-dd')
-        self.billing_end_date.dateChanged.connect(self.on_billing_date_changed)
+        self.billing_end_date.setDateTime(QDateTime.currentDateTime())
+        self.billing_end_date.setDisplayFormat('yyyy-MM-dd HH:mm')
+        self.billing_end_date.dateTimeChanged.connect(self.on_billing_date_changed)
         end_layout.addWidget(self.billing_end_date)
         billing_layout.addLayout(end_layout)
         
@@ -89,6 +89,17 @@ class PaymentDialog(QDialog):
         months_layout.addWidget(self.billing_months_label)
         months_layout.addStretch()
         billing_layout.addLayout(months_layout)
+        
+        # 用量输入（可选，适用于 元/度 或 元/小时 场景）
+        usage_layout = QHBoxLayout()
+        usage_layout.addWidget(QLabel('用量(可选):'))
+        self.usage_input = QDoubleSpinBox()
+        self.usage_input.setMinimum(0.0)
+        self.usage_input.setMaximum(9999999.99)
+        self.usage_input.setDecimals(2)
+        self.usage_input.setSuffix(' ')
+        usage_layout.addWidget(self.usage_input)
+        billing_layout.addLayout(usage_layout)
         
         layout.addWidget(billing_group)
         
@@ -222,9 +233,9 @@ class PaymentDialog(QDialog):
                 self.amount_label.setText('金额: ¥0.00')
                 return
             
-            # 计算计费周期数
-            start_date = self.billing_start_date.date().toPyDate()
-            end_date = self.billing_end_date.date().toPyDate()
+            # 计算计费周期数（基于日期）
+            start_date = self.billing_start_date.dateTime().toPyDateTime().date()
+            end_date = self.billing_end_date.dateTime().toPyDateTime().date()
             if end_date < start_date:
                 self.amount_label.setText('金额: ¥0.00（请检查日期）')
                 return
@@ -241,15 +252,17 @@ class PaymentDialog(QDialog):
             if charge_item.charge_type == 'manual':
                 amount = self.manual_amount_input.value()
             else:
-                # 传入计费开始/结束日期，ChargeService 会根据 charge_item.unit 自动处理按日/按月/按年
-                billing_start_date_py = self.billing_start_date.date().toPyDate()
-                billing_end_date_py = self.billing_end_date.date().toPyDate()
+                # 传入计费开始/结束 datetime，ChargeService 会根据 charge_item.unit 自动处理按日/按月/按年/小时/度
+                billing_start_dt = self.billing_start_date.dateTime().toPyDateTime()
+                billing_end_dt = self.billing_end_date.dateTime().toPyDateTime()
+                usage_val = float(self.usage_input.value()) if self.usage_input.value() and self.usage_input.value() > 0 else None
                 amount = ChargeService.calculate_amount(
                     charge_item,
                     resident_area=float(resident.area) if resident.area else 0.0,
                     months=months,
-                    billing_start_date=billing_start_date_py,
-                    billing_end_date=billing_end_date_py
+                    billing_start_date=billing_start_dt,
+                    billing_end_date=billing_end_dt,
+                    usage=usage_val
                 )
             
             self.amount_label.setText(f'金额: ¥{amount:.2f}（{months}个月）')

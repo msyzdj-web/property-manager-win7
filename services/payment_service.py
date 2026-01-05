@@ -98,7 +98,7 @@ class PaymentService:
     @staticmethod
     def create_payment(resident_id: int, charge_item_id: int, period: str, 
                       billing_start_date, billing_end_date, billing_months: int,
-                      amount: float, db: Session = None):
+                      amount: float, usage: float = None, db: Session = None):
         """创建缴费记录（生成账单）
         
         Args:
@@ -135,7 +135,8 @@ class PaymentService:
                 paid_months=0,
                 amount=amount,
                 paid_amount=0,
-                paid=0
+                paid=0,
+                usage=usage
             )
             db.add(payment)
             db.commit()
