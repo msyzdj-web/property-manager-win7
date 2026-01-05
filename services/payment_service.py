@@ -299,12 +299,31 @@ class PaymentService:
                 query = query.filter(Payment.period == period)
             
             # 搜索关键词
-            keyword = f"%{keyword}%"
-            query = query.join(Resident).join(ChargeItem).filter(
-                (Resident.room_no.like(keyword)) |
-                (Resident.name.like(keyword)) |
-                (ChargeItem.name.like(keyword))
-            )
+            # 支持输入格式： "building-unit-room" 或 "unit-room" 或普通关键字
+            import re
+            m = re.match(r'^\s*(\d+)\s*[-\s]+(\d+)\s*[-\s]+(\d+)\s*$', keyword)
+            m2 = re.match(r'^\s*(\d+)\s*[-\s]+(\d+)\s*$', keyword)
+            if m:
+                b, u, rno = m.groups()
+                query = query.join(Resident).join(ChargeItem).filter(
+                    (Resident.building == str(b)) &
+                    (Resident.unit == str(u)) &
+                    (Resident.room_no.like(f"%{rno}%"))
+                )
+            elif m2:
+                a, b = m2.groups()
+                # treat as unit-room or building-room depending on data; try both
+                query = query.join(Resident).join(ChargeItem).filter(
+                    ((Resident.unit == str(a)) & (Resident.room_no.like(f"%{b}%"))) |
+                    ((Resident.building == str(a)) & (Resident.room_no.like(f"%{b}%")))
+                )
+            else:
+                keyword_like = f"%{keyword}%"
+                query = query.join(Resident).join(ChargeItem).filter(
+                    (Resident.room_no.like(keyword_like)) |
+                    (Resident.name.like(keyword_like)) |
+                    (ChargeItem.name.like(keyword_like))
+                )
             
             return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
         finally:
