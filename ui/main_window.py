@@ -667,6 +667,37 @@ class MainWindow(QMainWindow):
             
             payments = PaymentService.get_payments_by_period(period)
             self.payment_table.setRowCount(len(payments))
+
+            # 根据 payments 中最常见的单位调整表头（尽量反映度/小时/天/月）
+            try:
+                units = [ (p.charge_item.unit or '').lower() if p.charge_item else '' for p in payments ]
+                uniq = set(units)
+                if len(uniq) == 1:
+                    u = list(uniq)[0]
+                    if '度' in u:
+                        header_total = '总度数'
+                        header_paid = '已缴度数'
+                    elif '小时' in u or '时' in u:
+                        header_total = '总小时数'
+                        header_paid = '已缴小时数'
+                    elif '天' in u or '日' in u:
+                        header_total = '总天数'
+                        header_paid = '已缴天数'
+                    else:
+                        header_total = '总月数'
+                        header_paid = '已缴月数'
+                else:
+                    # 混合单位时使用通用表头
+                    header_total = '总计'
+                    header_paid = '已缴'
+                # 更新表头显示（列 5 为总，列6 为已缴）
+                try:
+                    self.payment_table.horizontalHeaderItem(5).setText(header_total)
+                    self.payment_table.horizontalHeaderItem(6).setText(header_paid)
+                except Exception:
+                    pass
+            except Exception:
+                pass
             
             for row, payment in enumerate(payments):
                 self.payment_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
@@ -683,17 +714,37 @@ class MainWindow(QMainWindow):
                     seconds = (payment.billing_end_date - payment.billing_start_date).total_seconds()
                     hours = max(1, int((seconds + 3599) // 3600))
                     self.payment_table.setItem(row, 5, QTableWidgetItem(f"{hours} 小时"))
+                    # 已缴按小时：以已缴金额 / 单价 计算已缴小时数（向下取整）
+                    try:
+                        paid_hours = int((float(payment.paid_amount or 0.0) / float(payment.charge_item.price)) if payment.charge_item and payment.charge_item.price else 0)
+                    except Exception:
+                        paid_hours = 0
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(f"{paid_hours} 小时"))
                 # 按天
                 elif ('天' in unit or '日' in unit) and payment.billing_start_date and payment.billing_end_date:
                     days = (payment.billing_end_date.date() - payment.billing_start_date.date()).days + 1
                     days = max(1, days)
                     self.payment_table.setItem(row, 5, QTableWidgetItem(f"{days} 天"))
+                    # 已缴按天：以已缴金额 / 单价 计算已缴天数（向下取整）
+                    try:
+                        paid_days = int((float(payment.paid_amount or 0.0) / float(payment.charge_item.price)) if payment.charge_item and payment.charge_item.price else 0)
+                    except Exception:
+                        paid_days = 0
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(f"{paid_days} 天"))
                 # 按度（显示用量）
                 elif '度' in unit:
                     usage_text = f"{payment.usage:.2f} 度" if getattr(payment, 'usage', None) is not None else '-'
                     self.payment_table.setItem(row, 5, QTableWidgetItem(usage_text))
+                    # 已缴按度：以已缴金额 / 单价 计算已缴度数（保留2位）
+                    try:
+                        paid_degrees = (float(payment.paid_amount or 0.0) / float(payment.charge_item.price)) if payment.charge_item and payment.charge_item.price else 0.0
+                        paid_degrees_text = f"{paid_degrees:.2f} 度"
+                    except Exception:
+                        paid_degrees_text = "0.00 度"
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(paid_degrees_text))
                 else:
                     self.payment_table.setItem(row, 5, QTableWidgetItem(f"{payment.billing_months} 月"))
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(f"{payment.paid_months} 月"))
                 self.payment_table.setItem(row, 6, QTableWidgetItem(f"{payment.paid_months} 月"))
                 # 计算并显示按单位感知的金额（避免旧数据未正确计算时显示错误）
                 try:
