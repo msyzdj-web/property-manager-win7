@@ -29,11 +29,16 @@ else:
 from models.database import init_db
 from migrate_db import migrate_database
 from ui.main_window import MainWindow
+from utils.logger import logger, setup_global_exception_handler
 
 
 def main():
     """主函数"""
     try:
+        # 设置全局异常处理器和启动日志
+        setup_global_exception_handler()
+        logger.log_startup_info()
+
         # ----------------- PyInstaller temp cleanup + single-instance -----------------
         # Clean up old PyInstaller _MEI* temp dirs to reduce "file already exists" popup risk.
         def cleanup_old_pyinstaller_dirs(days_old=1):

@@ -9,6 +9,7 @@ from models.resident import Resident
 from models.charge_item import ChargeItem
 from models.database import SessionLocal
 from decimal import Decimal, ROUND_HALF_UP
+from utils.logger import logger
 
 
 class PaymentService:
@@ -110,6 +111,9 @@ class PaymentService:
             billing_months: 计费周期数（月数）
             amount: 总金额
         """
+        logger.log_operation("CREATE_PAYMENT_START",
+                           f"resident_id={resident_id}, charge_item_id={charge_item_id}, period={period}, amount={amount}, usage={usage}")
+
         if db is None:
             db = SessionLocal()
         try:
@@ -144,8 +148,10 @@ class PaymentService:
             # 在关闭会话前加载关联对象，避免DetachedInstanceError
             _ = payment.resident
             _ = payment.charge_item
+            logger.log_operation("CREATE_PAYMENT_SUCCESS", f"Created payment id={payment.id}")
             return payment
         except Exception as e:
+            logger.log_error(e, f"CREATE_PAYMENT_FAILED: resident_id={resident_id}, charge_item_id={charge_item_id}")
             db.rollback()
             raise e
         finally:
@@ -267,6 +273,8 @@ class PaymentService:
     @staticmethod
     def delete_payment(payment_id: int, db: Session = None):
         """删除缴费记录"""
+        logger.log_operation("DELETE_PAYMENT_START", f"payment_id={payment_id}")
+
         if db is None:
             db = SessionLocal()
         try:
@@ -276,8 +284,10 @@ class PaymentService:
             
             db.delete(payment)
             db.commit()
+            logger.log_operation("DELETE_PAYMENT_SUCCESS", f"Deleted payment id={payment_id}")
             return True
         except Exception as e:
+            logger.log_error(e, f"DELETE_PAYMENT_FAILED: payment_id={payment_id}")
             db.rollback()
             raise e
         finally:
