@@ -738,9 +738,10 @@ class MainWindow(QMainWindow):
                 payment_ids.append(int(self.payment_table.item(r, 0).text()))
                 items.append(f"{self.payment_table.item(r,1).text()} {self.payment_table.item(r,4).text()}")
 
-            reply = QMessageBox.question(self, '确认', f'确定要删除以下账单吗？\n' + "\n".join(items),
-                                         QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
+            # 使用可滚动的确认对话框，避免长列表导致按钮不可见的问题
+            from ui.confirm_delete_dialog import ConfirmDeleteDialog
+            dlg = ConfirmDeleteDialog(self, items=items, title='确认删除账单')
+            if dlg.exec_() == ConfirmDeleteDialog.Accepted:
                 logger.log_operation("UI_DELETE_PAYMENT_CONFIRMED", f"payment_ids={payment_ids}")
                 try:
                     # 使用批量删除以避免死锁和提高性能
