@@ -37,7 +37,8 @@ class ChargeDialog(QDialog):
         type_layout = QHBoxLayout()
         type_layout.addWidget(QLabel('收费类型*:'))
         self.type_combo = QComboBox()
-        self.type_combo.addItems(['固定', '按面积', '手动'])
+        # 支持更多的收费显示类型：按度数、按时间（小时）、按天数，实际上这些项在后台以 fixed 处理但单位决定计算方式
+        self.type_combo.addItems(['固定', '按面积', '手动', '按度数', '按时间', '按天数'])
         self.type_combo.currentTextChanged.connect(self.on_type_changed)
         type_layout.addWidget(self.type_combo)
         layout.addLayout(type_layout)
@@ -63,7 +64,7 @@ class ChargeDialog(QDialog):
         layout.addLayout(unit_layout)
         
         # 说明标签
-        self.info_label = QLabel('固定：单价 × 计费月数\n按面积：单价 × 面积 × 计费月数\n手动：生成账单时手动输入金额')
+        self.info_label = QLabel('固定：单价 × 计费月数\n按面积：单价 × 面积 × 计费月数\n手动：生成账单时手动输入金额\n按度数：单价（元/度）× 用量\n按时间：单价（元/小时）× 时长（按小时向上取整）\n按天数：单价（元/天）× 天数')
         self.info_label.setWordWrap(True)
         layout.addWidget(self.info_label)
         
@@ -87,6 +88,12 @@ class ChargeDialog(QDialog):
             self.price_input.setSuffix(' 元（固定金额）')
         elif type_text == '按面积':
             self.price_input.setSuffix(' 元/平方米')
+        elif type_text == '按度数':
+            self.price_input.setSuffix(' 元/度')
+        elif type_text == '按时间':
+            self.price_input.setSuffix(' 元/小时')
+        elif type_text == '按天数':
+            self.price_input.setSuffix(' 元/天')
         else:
             self.price_input.setSuffix(' 元（参考金额）')
     
@@ -97,10 +104,20 @@ class ChargeDialog(QDialog):
             if item:
                 self.name_input.setText(item.name)
                 self.price_input.setValue(float(item.price))
-                
-                type_map = {'fixed': '固定', 'area': '按面积', 'manual': '手动'}
-                type_name = type_map.get(item.charge_type, '固定')
-                index = self.type_combo.findText(type_name)
+                # 根据数据库中的 unit 推断更细的显示类型（例如单价为 元/度 -> 显示为 按度数）
+                inferred_type = None
+                unit = (item.unit or '').lower()
+                if '度' in unit:
+                    inferred_type = '按度数'
+                elif '时' in unit or '小时' in unit:
+                    inferred_type = '按时间'
+                elif '天' in unit:
+                    inferred_type = '按天数'
+                else:
+                    type_map = {'fixed': '固定', 'area': '按面积', 'manual': '手动'}
+                    inferred_type = type_map.get(item.charge_type, '固定')
+
+                index = self.type_combo.findText(inferred_type)
                 if index >= 0:
                     self.type_combo.setCurrentIndex(index)
                 
@@ -133,7 +150,8 @@ class ChargeDialog(QDialog):
             QMessageBox.warning(self, '提示', '请输入单位')
             return
         
-        type_map = {'固定': 'fixed', '按面积': 'area', '手动': 'manual'}
+        # 将显示的类型映射为数据库的 charge_type（按度/按时间/按天数仍然使用 fixed，单位决定计算方式）
+        type_map = {'固定': 'fixed', '按面积': 'area', '手动': 'manual', '按度数': 'fixed', '按时间': 'fixed', '按天数': 'fixed'}
         charge_type = type_map.get(type_text, 'fixed')
         
         try:
