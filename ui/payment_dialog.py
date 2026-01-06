@@ -210,6 +210,12 @@ class PaymentDialog(QDialog):
                     pass
             # 更改按钮文本为保存修改
             self.save_btn.setText('保存修改')
+            # 重新计算并显示金额/周期（基于单位感知）
+            try:
+                self.calculate_billing_months()
+                self.calculate_amount()
+            except Exception:
+                pass
         except Exception as e:
             QMessageBox.critical(self, '错误', f'加载账单失败：{str(e)}')
     
