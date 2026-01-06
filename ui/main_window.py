@@ -731,15 +731,15 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, '提示', '请选择要删除的账单（可多选）')
                 return
 
-        payment_ids = []
-        items = []
-        for idx in selected_ranges:
-            r = idx.row()
-            payment_ids.append(int(self.payment_table.item(r, 0).text()))
-            items.append(f"{self.payment_table.item(r,1).text()} {self.payment_table.item(r,4).text()}")
+            payment_ids = []
+            items = []
+            for idx in selected_ranges:
+                r = idx.row()
+                payment_ids.append(int(self.payment_table.item(r, 0).text()))
+                items.append(f"{self.payment_table.item(r,1).text()} {self.payment_table.item(r,4).text()}")
 
-        reply = QMessageBox.question(self, '确认', f'确定要删除以下账单吗？\n' + "\n".join(items),
-                                     QMessageBox.Yes | QMessageBox.No)
+            reply = QMessageBox.question(self, '确认', f'确定要删除以下账单吗？\n' + "\n".join(items),
+                                         QMessageBox.Yes | QMessageBox.No)
             if reply == QMessageBox.Yes:
                 logger.log_operation("UI_DELETE_PAYMENT_CONFIRMED", f"payment_ids={payment_ids}")
                 try:
