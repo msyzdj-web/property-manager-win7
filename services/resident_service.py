@@ -235,7 +235,9 @@ class ResidentService:
             else:
                 keyword_like = f"%{keyword}%"
                 return db.query(Resident).filter(
-                    (Resident.room_no.like(keyword_like)) | (Resident.name.like(keyword_like))
+                    (Resident.room_no.like(keyword_like)) |
+                    (Resident.name.like(keyword_like)) |
+                    (Resident.phone.like(keyword_like))
                 ).order_by(Resident.room_no).all()
         finally:
             if db is not None:

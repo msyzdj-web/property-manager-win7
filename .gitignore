@@ -50,5 +50,9 @@ Thumbs.db
 *.exe.*
 release/
 
+# 导出的数据文件
+*.xlsx
+*.xls
+
 ._*
 exports/

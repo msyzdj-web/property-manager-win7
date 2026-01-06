@@ -159,6 +159,63 @@ class PaymentService:
                 db.close()
     
     @staticmethod
+    def update_payment(payment_id: int, resident_id: int = None, charge_item_id: int = None,
+                       period: str = None, billing_start_date = None, billing_end_date = None,
+                       billing_months: int = None, amount: float = None, usage: float = None, db: Session = None):
+        """更新已有缴费记录"""
+        logger.log_operation("UPDATE_PAYMENT_START", f"payment_id={payment_id}")
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
+        try:
+            payment = db.query(Payment).filter(Payment.id == payment_id).first()
+            if not payment:
+                raise ValueError("缴费记录不存在")
+
+            if resident_id is not None:
+                payment.resident_id = resident_id
+            if charge_item_id is not None:
+                payment.charge_item_id = charge_item_id
+            if period is not None:
+                payment.period = period
+            if billing_start_date is not None:
+                payment.billing_start_date = billing_start_date
+            if billing_end_date is not None:
+                payment.billing_end_date = billing_end_date
+            # 重新计算 billing_months 如果未显式传入但有起止日期
+            if billing_months is not None:
+                payment.billing_months = billing_months
+            else:
+                try:
+                    if billing_start_date and billing_end_date:
+                        years = billing_end_date.year - billing_start_date.year
+                        months = years * 12 + (billing_end_date.month - billing_start_date.month)
+                        if billing_end_date.day >= billing_start_date.day:
+                            months += 1
+                        payment.billing_months = months if months > 0 else 1
+                except Exception:
+                    pass
+            if amount is not None:
+                payment.amount = amount
+            if usage is not None:
+                payment.usage = usage
+
+            db.commit()
+            db.refresh(payment)
+            _ = payment.resident
+            _ = payment.charge_item
+            logger.log_operation("UPDATE_PAYMENT_SUCCESS", f"payment_id={payment_id}")
+            return payment
+        except Exception as e:
+            logger.log_error(e, f"UPDATE_PAYMENT_FAILED: payment_id={payment_id}")
+            db.rollback()
+            raise e
+        finally:
+            if close_db and db is not None:
+                db.close()
+    
+    @staticmethod
     def mark_paid(payment_id: int, paid_months: int = None, operator: str = '', db: Session = None):
         """标记为已缴费（支持部分缴费）
         
@@ -375,6 +432,7 @@ class PaymentService:
                 query = query.join(Resident).join(ChargeItem).filter(
                     (Resident.room_no.like(keyword_like)) |
                     (Resident.name.like(keyword_like)) |
+                    (Resident.phone.like(keyword_like)) |
                     (ChargeItem.name.like(keyword_like))
                 )
             

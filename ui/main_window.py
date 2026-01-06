@@ -314,12 +314,14 @@ class MainWindow(QMainWindow):
         # 工具栏
         toolbar_layout = QHBoxLayout()
         self.add_payment_btn = QPushButton('生成账单')
+        self.edit_payment_btn = QPushButton('编辑账单')
         self.mark_paid_btn = QPushButton('缴费')
         self.delete_payment_btn = QPushButton('批量删除')
         self.print_receipt_btn = QPushButton('打印收据')
         self.refresh_payment_btn = QPushButton('刷新')
         
         self.add_payment_btn.clicked.connect(self.add_payment)
+        self.edit_payment_btn.clicked.connect(self.edit_payment)
         self.mark_paid_btn.clicked.connect(self.mark_payment_paid)
         self.delete_payment_btn.clicked.connect(self.delete_payment)
         self.print_receipt_btn.clicked.connect(self.print_receipt)
@@ -334,6 +336,7 @@ class MainWindow(QMainWindow):
         self.report_btn = QPushButton('生成报表')
         
         toolbar_layout.addWidget(self.add_payment_btn)
+        toolbar_layout.addWidget(self.edit_payment_btn)
         toolbar_layout.addWidget(self.batch_payment_btn)
         toolbar_layout.addWidget(self.mark_paid_btn)
         toolbar_layout.addWidget(self.delete_payment_btn)
@@ -705,6 +708,25 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.log_error(e, "UI_ADD_PAYMENT")
             QMessageBox.critical(self, '错误', f'生成账单失败：{str(e)}')
+
+    def edit_payment(self):
+        """编辑选中的账单"""
+        try:
+            selected_rows = self.payment_table.selectedItems()
+            if not selected_rows:
+                QMessageBox.warning(self, '提示', '请选择要编辑的账单')
+                return
+
+            payment_id = int(self.payment_table.item(selected_rows[0].row(), 0).text())
+            dialog = PaymentDialog(self)
+            # 加载账单到对话框以编辑
+            dialog.load_payment(payment_id)
+            if dialog.exec_() == PaymentDialog.Accepted:
+                self.load_periods()
+                self.load_payments()
+        except Exception as e:
+            logger.log_error(e, "UI_EDIT_PAYMENT")
+            QMessageBox.critical(self, '错误', f'编辑账单失败：{str(e)}')
     
     def mark_payment_paid(self):
         """标记已缴费（支持部分缴费）"""
@@ -731,16 +753,17 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, '提示', '请选择要删除的账单（可多选）')
                 return
 
-        payment_ids = []
-        items = []
-        for idx in selected_ranges:
-            r = idx.row()
-            payment_ids.append(int(self.payment_table.item(r, 0).text()))
-            items.append(f"{self.payment_table.item(r,1).text()} {self.payment_table.item(r,4).text()}")
+            payment_ids = []
+            items = []
+            for idx in selected_ranges:
+                r = idx.row()
+                payment_ids.append(int(self.payment_table.item(r, 0).text()))
+                items.append(f"{self.payment_table.item(r,1).text()} {self.payment_table.item(r,4).text()}")
 
-        reply = QMessageBox.question(self, '确认', f'确定要删除以下账单吗？\n' + "\n".join(items),
-                                     QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.Yes:
+            # 使用可滚动的确认对话框，避免长列表导致按钮不可见的问题
+            from ui.confirm_delete_dialog import ConfirmDeleteDialog
+            dlg = ConfirmDeleteDialog(self, items=items, title='确认删除账单')
+            if dlg.exec_() == ConfirmDeleteDialog.Accepted:
                 logger.log_operation("UI_DELETE_PAYMENT_CONFIRMED", f"payment_ids={payment_ids}")
                 try:
                     # 使用批量删除以避免死锁和提高性能
@@ -783,14 +806,34 @@ class MainWindow(QMainWindow):
             self.payment_table.setRowCount(len(payments))
             
             for row, payment in enumerate(payments):
+                # Match the same columns/format as load_payments to avoid misalignment
                 self.payment_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
                 self.payment_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
-                self.payment_table.setItem(row, 4, QTableWidgetItem(payment.period))
-                self.payment_table.setItem(row, 5, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
-                self.payment_table.setItem(row, 6, QTableWidgetItem('已缴费' if payment.paid == 1 else '未缴费'))
-                self.payment_table.setItem(row, 7, QTableWidgetItem(
+                # 计费周期显示：优先显示起止日期范围，否则显示 period 文本
+                billing_period = f"{payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}" if payment.billing_start_date and payment.billing_end_date else payment.period
+                self.payment_table.setItem(row, 4, QTableWidgetItem(billing_period))
+                # 总月数 / 已缴月数 / 金额 / 已缴金额 / 状态 / 缴费时间
+                try:
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(f"{payment.billing_months} 月"))
+                except Exception:
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(''))
+                try:
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(f"{payment.paid_months} 月"))
+                except Exception:
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(''))
+                self.payment_table.setItem(row, 7, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
+                self.payment_table.setItem(row, 8, QTableWidgetItem(self._fmt_amount_int(payment.paid_amount)))
+                # 缴费状态文本
+                if getattr(payment, 'paid', 0) == 1:
+                    status_text = '已缴费'
+                elif getattr(payment, 'paid_months', 0) > 0:
+                    status_text = f'部分缴费({payment.paid_months}/{payment.billing_months})'
+                else:
+                    status_text = '未缴费'
+                self.payment_table.setItem(row, 9, QTableWidgetItem(status_text))
+                self.payment_table.setItem(row, 10, QTableWidgetItem(
                     payment.paid_time.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_time else ''))
         except Exception as e:
             QMessageBox.critical(self, '错误', f'搜索失败：{str(e)}')
@@ -1033,8 +1076,9 @@ class MainWindow(QMainWindow):
                         continue
                     name = (p.resident.name or '').lower()
                     room = (p.resident.room_no or '').lower()
+                    phone = (p.resident.phone or '').lower()
                     item = (p.charge_item.name or '').lower() if p.charge_item else ''
-                    if keyword in name or keyword in room or keyword in item:
+                    if keyword in name or keyword in room or keyword in phone or keyword in item:
                         filtered.append(p)
                 except Exception:
                     # 如果访问字段出错，忽略该记录
