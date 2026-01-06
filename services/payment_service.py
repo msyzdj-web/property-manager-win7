@@ -436,9 +436,8 @@ class PaymentService:
                     (ChargeItem.name.like(keyword_like))
                 )
             
-            # Order search results by room number to produce a "natural" listing
-            # which matches the main list ordering users expect.
             try:
+                # Order by resident.room_no to match the natural table ordering shown in the main UI
                 return query.order_by(Resident.room_no, Payment.created_at.desc()).all()
             except Exception:
                 return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
