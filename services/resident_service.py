@@ -216,10 +216,27 @@ class ResidentService:
         if db is None:
             db = SessionLocal()
         try:
-            keyword = f"%{keyword}%"
-            return db.query(Resident).filter(
-                (Resident.room_no.like(keyword)) | (Resident.name.like(keyword))
-            ).order_by(Resident.room_no).all()
+            import re
+            parts = re.findall(r'\d+', keyword)
+            if len(parts) == 3:
+                b, u, rno = parts
+                return db.query(Resident).filter(
+                    (Resident.building == str(b)) &
+                    (Resident.unit == str(u)) &
+                    (Resident.room_no.like(f"%{rno}%"))
+                ).order_by(Resident.room_no).all()
+            elif len(parts) == 2:
+                a, b = parts
+                return db.query(Resident).filter(
+                    ((Resident.unit == str(a)) & (Resident.room_no.like(f"%{b}%"))) |
+                    ((Resident.building == str(a)) & (Resident.room_no.like(f"%{b}%"))) |
+                    (Resident.name.like(f"%{keyword}%"))
+                ).order_by(Resident.room_no).all()
+            else:
+                keyword_like = f"%{keyword}%"
+                return db.query(Resident).filter(
+                    (Resident.room_no.like(keyword_like)) | (Resident.name.like(keyword_like))
+                ).order_by(Resident.room_no).all()
         finally:
             if db is not None:
                 db.close()

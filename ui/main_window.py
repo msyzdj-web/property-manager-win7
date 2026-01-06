@@ -20,6 +20,7 @@ from services.payment_service import PaymentService
 from models.database import DB_PATH, SessionLocal
 from models.payment import Payment
 from models.payment_transaction import PaymentTransaction
+from utils.logger import logger
 from ui.resident_dialog import ResidentDialog
 from ui.charge_dialog import ChargeDialog
 from ui.payment_dialog import PaymentDialog
@@ -314,7 +315,7 @@ class MainWindow(QMainWindow):
         toolbar_layout = QHBoxLayout()
         self.add_payment_btn = QPushButton('生成账单')
         self.mark_paid_btn = QPushButton('缴费')
-        self.delete_payment_btn = QPushButton('删除账单')
+        self.delete_payment_btn = QPushButton('批量删除')
         self.print_receipt_btn = QPushButton('打印收据')
         self.refresh_payment_btn = QPushButton('刷新')
         
@@ -692,10 +693,18 @@ class MainWindow(QMainWindow):
     
     def add_payment(self):
         """生成账单"""
-        dialog = PaymentDialog(self)
-        if dialog.exec_() == PaymentDialog.Accepted:
-            self.load_periods()
-            self.load_payments()
+        logger.log_operation("UI_ADD_PAYMENT_START")
+        try:
+            dialog = PaymentDialog(self)
+            if dialog.exec_() == PaymentDialog.Accepted:
+                self.load_periods()
+                self.load_payments()
+                logger.log_operation("UI_ADD_PAYMENT_SUCCESS")
+            else:
+                logger.log_operation("UI_ADD_PAYMENT_CANCELLED")
+        except Exception as e:
+            logger.log_error(e, "UI_ADD_PAYMENT")
+            QMessageBox.critical(self, '错误', f'生成账单失败：{str(e)}')
     
     def mark_payment_paid(self):
         """标记已缴费（支持部分缴费）"""
@@ -714,10 +723,13 @@ class MainWindow(QMainWindow):
     
     def delete_payment(self):
         """删除账单"""
-        selected_ranges = self.payment_table.selectionModel().selectedRows()
-        if not selected_ranges:
-            QMessageBox.warning(self, '提示', '请选择要删除的账单（可多选）')
-            return
+        logger.log_operation("UI_DELETE_PAYMENT_START")
+        try:
+            selected_ranges = self.payment_table.selectionModel().selectedRows()
+            if not selected_ranges:
+                logger.log_operation("UI_DELETE_PAYMENT_NO_SELECTION")
+                QMessageBox.warning(self, '提示', '请选择要删除的账单（可多选）')
+                return
 
         payment_ids = []
         items = []
@@ -728,20 +740,30 @@ class MainWindow(QMainWindow):
 
         reply = QMessageBox.question(self, '确认', f'确定要删除以下账单吗？\n' + "\n".join(items),
                                      QMessageBox.Yes | QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            failed = []
-            for pid in payment_ids:
+            if reply == QMessageBox.Yes:
+                logger.log_operation("UI_DELETE_PAYMENT_CONFIRMED", f"payment_ids={payment_ids}")
                 try:
-                    PaymentService.delete_payment(pid)
+                    # 使用批量删除以避免死锁和提高性能
+                    deleted_count, failed = PaymentService.delete_payments_batch(payment_ids)
+
+                    if not failed:
+                        logger.log_operation("UI_DELETE_PAYMENT_SUCCESS", f"deleted {deleted_count} payments")
+                        QMessageBox.information(self, '成功', f'已删除 {deleted_count} 个账单')
+                    else:
+                        logger.log_operation("UI_DELETE_PAYMENT_PARTIAL", f"deleted {deleted_count}, failed {len(failed)}")
+                        msgs = "\n".join([f"{pid}: {err}" for pid, err in failed])
+                        QMessageBox.warning(self, '部分失败', f'成功删除 {deleted_count} 个账单，失败 {len(failed)} 个：\n{msgs}')
                 except Exception as e:
-                    failed.append((pid, str(e)))
-            if not failed:
-                QMessageBox.information(self, '成功', '已删除选中账单')
+                    logger.log_error(e, "UI_DELETE_PAYMENT_BATCH_FAILED")
+                    QMessageBox.critical(self, '错误', f'删除账单时发生错误：{str(e)}')
+
+                self.load_payments()
+                self.load_unpaid()
             else:
-                msgs = "\n".join([f"{pid}: {err}" for pid, err in failed])
-                QMessageBox.warning(self, '部分失败', f'部分账单删除失败：\n{msgs}')
-            self.load_payments()
-            self.load_unpaid()
+                logger.log_operation("UI_DELETE_PAYMENT_CANCELLED")
+        except Exception as e:
+            logger.log_error(e, "UI_DELETE_PAYMENT")
+            QMessageBox.critical(self, '错误', f'删除账单时发生错误：{str(e)}')
     
     def search_payments(self):
         """搜索账单"""

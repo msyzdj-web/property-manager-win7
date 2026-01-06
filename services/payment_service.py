@@ -9,6 +9,7 @@ from models.resident import Resident
 from models.charge_item import ChargeItem
 from models.database import SessionLocal
 from decimal import Decimal, ROUND_HALF_UP
+from utils.logger import logger
 
 
 class PaymentService:
@@ -98,7 +99,7 @@ class PaymentService:
     @staticmethod
     def create_payment(resident_id: int, charge_item_id: int, period: str, 
                       billing_start_date, billing_end_date, billing_months: int,
-                      amount: float, db: Session = None):
+                      amount: float, usage: float = None, db: Session = None):
         """创建缴费记录（生成账单）
         
         Args:
@@ -110,6 +111,9 @@ class PaymentService:
             billing_months: 计费周期数（月数）
             amount: 总金额
         """
+        logger.log_operation("CREATE_PAYMENT_START",
+                           f"resident_id={resident_id}, charge_item_id={charge_item_id}, period={period}, amount={amount}, usage={usage}")
+
         if db is None:
             db = SessionLocal()
         try:
@@ -135,7 +139,8 @@ class PaymentService:
                 paid_months=0,
                 amount=amount,
                 paid_amount=0,
-                paid=0
+                paid=0,
+                usage=usage
             )
             db.add(payment)
             db.commit()
@@ -143,8 +148,10 @@ class PaymentService:
             # 在关闭会话前加载关联对象，避免DetachedInstanceError
             _ = payment.resident
             _ = payment.charge_item
+            logger.log_operation("CREATE_PAYMENT_SUCCESS", f"Created payment id={payment.id}")
             return payment
         except Exception as e:
+            logger.log_error(e, f"CREATE_PAYMENT_FAILED: resident_id={resident_id}, charge_item_id={charge_item_id}")
             db.rollback()
             raise e
         finally:
@@ -266,21 +273,68 @@ class PaymentService:
     @staticmethod
     def delete_payment(payment_id: int, db: Session = None):
         """删除缴费记录"""
+        logger.log_operation("DELETE_PAYMENT_START", f"payment_id={payment_id}")
+
+        close_db = False
         if db is None:
             db = SessionLocal()
+            close_db = True
+
         try:
             payment = db.query(Payment).filter(Payment.id == payment_id).first()
             if not payment:
                 raise ValueError("缴费记录不存在")
-            
+
             db.delete(payment)
             db.commit()
+            logger.log_operation("DELETE_PAYMENT_SUCCESS", f"Deleted payment id={payment_id}")
             return True
         except Exception as e:
+            logger.log_error(e, f"DELETE_PAYMENT_FAILED: payment_id={payment_id}")
             db.rollback()
             raise e
         finally:
-            if db is not None:
+            if close_db and db is not None:
+                db.close()
+
+    @staticmethod
+    def delete_payments_batch(payment_ids: list, db: Session = None):
+        """批量删除缴费记录（使用单个数据库会话以提高性能和避免死锁）"""
+        logger.log_operation("DELETE_PAYMENTS_BATCH_START", f"payment_ids={payment_ids}")
+
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
+
+        try:
+            deleted_count = 0
+            failed_deletes = []
+
+            for payment_id in payment_ids:
+                try:
+                    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+                    if payment:
+                        db.delete(payment)
+                        deleted_count += 1
+                        logger.log_operation("DELETE_PAYMENT_BATCH_ITEM_SUCCESS", f"payment_id={payment_id}")
+                    else:
+                        failed_deletes.append((payment_id, "缴费记录不存在"))
+                        logger.log_error(ValueError("缴费记录不存在"), f"DELETE_PAYMENT_BATCH_ITEM_NOT_FOUND: payment_id={payment_id}")
+                except Exception as e:
+                    failed_deletes.append((payment_id, str(e)))
+                    logger.log_error(e, f"DELETE_PAYMENT_BATCH_ITEM_FAILED: payment_id={payment_id}")
+
+            db.commit()
+            logger.log_operation("DELETE_PAYMENTS_BATCH_SUCCESS", f"deleted={deleted_count}, failed={len(failed_deletes)}")
+            return deleted_count, failed_deletes
+
+        except Exception as e:
+            logger.log_error(e, "DELETE_PAYMENTS_BATCH_FAILED")
+            db.rollback()
+            raise e
+        finally:
+            if close_db and db is not None:
                 db.close()
     
     @staticmethod
@@ -299,12 +353,30 @@ class PaymentService:
                 query = query.filter(Payment.period == period)
             
             # 搜索关键词
-            keyword = f"%{keyword}%"
-            query = query.join(Resident).join(ChargeItem).filter(
-                (Resident.room_no.like(keyword)) |
-                (Resident.name.like(keyword)) |
-                (ChargeItem.name.like(keyword))
-            )
+            # 支持输入格式： "building-unit-room" 或 "unit-room" 或普通关键字
+            import re
+            parts = re.findall(r'\d+', keyword)
+            if len(parts) == 3:
+                b, u, rno = parts
+                query = query.join(Resident).join(ChargeItem).filter(
+                    (Resident.building == str(b)) &
+                    (Resident.unit == str(u)) &
+                    (Resident.room_no.like(f"%{rno}%"))
+                )
+            elif len(parts) == 2:
+                a, b = parts
+                # treat as unit-room or building-room depending on data; try both
+                query = query.join(Resident).join(ChargeItem).filter(
+                    ((Resident.unit == str(a)) & (Resident.room_no.like(f"%{b}%"))) |
+                    ((Resident.building == str(a)) & (Resident.room_no.like(f"%{b}%")))
+                )
+            else:
+                keyword_like = f"%{keyword}%"
+                query = query.join(Resident).join(ChargeItem).filter(
+                    (Resident.room_no.like(keyword_like)) |
+                    (Resident.name.like(keyword_like)) |
+                    (ChargeItem.name.like(keyword_like))
+                )
             
             return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
         finally:

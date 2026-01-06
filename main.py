@@ -26,14 +26,45 @@ else:
     except:
         pass
 
+# When running as a frozen executable, ensure the unpacked MEIPASS dir and cwd are on sys.path
+if getattr(sys, 'frozen', False):
+    try:
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass and meipass not in sys.path:
+            sys.path.insert(0, meipass)
+    except Exception:
+        pass
+    try:
+        cwd = os.getcwd()
+        if cwd and cwd not in sys.path:
+            sys.path.insert(0, cwd)
+    except Exception:
+        pass
+
+# Local imports (after ensuring sys.path contains application files)
 from models.database import init_db
 from migrate_db import migrate_database
-from ui.main_window import MainWindow
+try:
+    from ui.main_window import MainWindow
+except ModuleNotFoundError:
+    # Fallback: try importing by adjusting path to script directory
+    try:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        if script_dir not in sys.path:
+            sys.path.insert(0, script_dir)
+        from ui.main_window import MainWindow
+    except Exception:
+        raise
+from utils.logger import logger, setup_global_exception_handler
 
 
 def main():
     """主函数"""
     try:
+        # 设置全局异常处理器和启动日志
+        setup_global_exception_handler()
+        logger.log_startup_info()
+
         # ----------------- PyInstaller temp cleanup + single-instance -----------------
         # Clean up old PyInstaller _MEI* temp dirs to reduce "file already exists" popup risk.
         def cleanup_old_pyinstaller_dirs(days_old=1):
