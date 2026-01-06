@@ -234,19 +234,71 @@ class PaymentDialog(QDialog):
     
     def calculate_billing_months(self):
         """计算计费周期数"""
-        start_date = self.billing_start_date.date().toPyDate()
-        end_date = self.billing_end_date.date().toPyDate()
-        
-        if end_date < start_date:
+        """计算并展示计费周期（根据收费项目单位：月/天/小时/度 等）"""
+        # 默认清理
+        self._computed_billing_count = None
+        self._computed_billing_unit = '月'
+
+        start_dt = self.billing_start_date.dateTime().toPyDateTime()
+        end_dt = self.billing_end_date.dateTime().toPyDateTime()
+
+        # 如果结束早于开始，提示并返回
+        if end_dt < start_dt:
             self.billing_months_label.setText('0 月（结束日期不能早于开始日期）')
             return
-        
-        # 计算月数
+
+        # 获取当前选中收费项目的单位（若可用）
+        charge_item = None
+        try:
+            cid = self.charge_combo.currentData()
+            if cid:
+                charge_item = ChargeService.get_charge_item_by_id(cid)
+        except Exception:
+            charge_item = None
+
+        unit = (charge_item.unit or '').lower() if charge_item else ''
+
+        # 按小时计费
+        if '小时' in unit or '时' in unit:
+            seconds = (end_dt - start_dt).total_seconds()
+            hours = max(1, int((seconds + 3599) // 3600))  # 向上取整小时
+            self._computed_billing_count = hours
+            self._computed_billing_unit = '小时'
+            self.billing_months_label.setText(f'{hours} 小时')
+            return
+
+        # 按天计费
+        if '天' in unit or '日' in unit:
+            start_date = start_dt.date()
+            end_date = end_dt.date()
+            days = (end_date - start_date).days + 1
+            if days <= 0:
+                days = 1
+            self._computed_billing_count = days
+            self._computed_billing_unit = '天'
+            self.billing_months_label.setText(f'{days} 天')
+            return
+
+        # 按度数计费 - 以用量为准（不基于日期）
+        if '度' in unit:
+            try:
+                usage_val = float(self.usage_input.value())
+            except Exception:
+                usage_val = 0.0
+            self._computed_billing_count = usage_val
+            self._computed_billing_unit = '度'
+            self.billing_months_label.setText(f'用量: {usage_val:.2f} 度')
+            return
+
+        # 否则按月计费（默认）
+        start_date = start_dt.date()
+        end_date = end_dt.date()
         months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
-        # 如果结束日期的天数大于等于开始日期的天数，加1个月
         if end_date.day >= start_date.day:
             months += 1
-        
+        months = max(1, months)
+        self._computed_billing_count = months
+        self._computed_billing_unit = '月'
         self.billing_months_label.setText(f'{months} 月')
     
     def on_charge_changed(self):
@@ -279,19 +331,13 @@ class PaymentDialog(QDialog):
                 self.amount_label.setText('金额: ¥0.00')
                 return
             
-            # 计算计费周期数（基于日期）
-            start_date = self.billing_start_date.dateTime().toPyDateTime().date()
-            end_date = self.billing_end_date.dateTime().toPyDateTime().date()
-            if end_date < start_date:
-                self.amount_label.setText('金额: ¥0.00（请检查日期）')
-                return
+            # 先计算并展示计费周期（不同单位展示不同）
+            self.calculate_billing_months()
+            months = self._computed_billing_count if self._computed_billing_unit == '月' else None
             
-            months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
-            if end_date.day >= start_date.day:
-                months += 1
-            
-            if months <= 0:
-                self.amount_label.setText('金额: ¥0.00（周期数无效）')
+            # 对于无效日期或计算结果，防御性处理
+            if self._computed_billing_count is None:
+                self.amount_label.setText('金额: ¥0.00（请检查日期/用量）')
                 return
             
             # 计算金额
@@ -305,13 +351,26 @@ class PaymentDialog(QDialog):
                 amount = ChargeService.calculate_amount(
                     charge_item,
                     resident_area=float(resident.area) if resident.area else 0.0,
-                    months=months,
+                    months=months if months is not None else 1,
                     billing_start_date=billing_start_dt,
                     billing_end_date=billing_end_dt,
                     usage=usage_val
                 )
             
-            self.amount_label.setText(f'金额: ¥{amount:.2f}（{months}个月）')
+            # 根据展示单位格式化周期说明
+            unit = getattr(self, '_computed_billing_unit', '月')
+            count = getattr(self, '_computed_billing_count', 1)
+            if unit == '月':
+                suffix = f'（{int(count)}个月）'
+            elif unit == '小时':
+                suffix = f'（{int(count)}小时）'
+            elif unit == '天':
+                suffix = f'（{int(count)}天）'
+            elif unit == '度':
+                suffix = f'（用量 {count:.2f} 度）'
+            else:
+                suffix = ''
+            self.amount_label.setText(f'金额: ¥{amount:.2f}{suffix}')
         except Exception as e:
             # 静默处理错误，避免影响用户体验
             self.amount_label.setText('金额: ¥0.00')

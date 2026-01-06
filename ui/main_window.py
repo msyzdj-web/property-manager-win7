@@ -673,10 +673,27 @@ class MainWindow(QMainWindow):
                 self.payment_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
-                # 计费周期
-                billing_period = f"{payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}" if payment.billing_start_date and payment.billing_end_date else payment.period
+                # 计费周期显示：对不同单位展示为 月/天/小时/度 等
+                billing_period = f"{payment.billing_start_date.strftime('%Y-%m-%d %H:%M') } 至 {payment.billing_end_date.strftime('%Y-%m-%d %H:%M')}" if payment.billing_start_date and payment.billing_end_date else payment.period
                 self.payment_table.setItem(row, 4, QTableWidgetItem(billing_period))
-                self.payment_table.setItem(row, 5, QTableWidgetItem(f"{payment.billing_months} 月"))
+
+                unit = (payment.charge_item.unit or '').lower() if payment.charge_item else ''
+                # 按小时
+                if ('小时' in unit or '时' in unit) and payment.billing_start_date and payment.billing_end_date:
+                    seconds = (payment.billing_end_date - payment.billing_start_date).total_seconds()
+                    hours = max(1, int((seconds + 3599) // 3600))
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(f"{hours} 小时"))
+                # 按天
+                elif ('天' in unit or '日' in unit) and payment.billing_start_date and payment.billing_end_date:
+                    days = (payment.billing_end_date.date() - payment.billing_start_date.date()).days + 1
+                    days = max(1, days)
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(f"{days} 天"))
+                # 按度（显示用量）
+                elif '度' in unit:
+                    usage_text = f"{payment.usage:.2f} 度" if getattr(payment, 'usage', None) is not None else '-'
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(usage_text))
+                else:
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(f"{payment.billing_months} 月"))
                 self.payment_table.setItem(row, 6, QTableWidgetItem(f"{payment.paid_months} 月"))
                 self.payment_table.setItem(row, 7, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
                 # 已缴金额列
