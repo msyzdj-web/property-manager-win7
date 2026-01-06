@@ -26,6 +26,8 @@ from ui.charge_dialog import ChargeDialog
 from ui.payment_dialog import PaymentDialog
 from ui.receipt_dialog import ReceiptDialog
 from ui.pay_dialog import PayDialog
+from ui.degree_pay_dialog import DegreePayDialog
+from ui.unit_pay_dialog import UnitPayDialog
 from ui.import_dialog import ImportDialog
 from ui.export_dialog import ExportDialog
 from ui.backup_dialog import BackupDialog
@@ -821,9 +823,15 @@ class MainWindow(QMainWindow):
         
         payment_id = int(self.payment_table.item(selected_rows[0].row(), 0).text())
         
-        # 打开缴费对话框
-        dialog = PayDialog(self, payment_id=payment_id)
-        if dialog.exec_() == PayDialog.Accepted:
+        # 打开适配的缴费对话框（按单位）
+        payment = PaymentService.get_payment_by_id(payment_id)
+        unit = (payment.charge_item.unit or '').lower() if payment and payment.charge_item else ''
+        if '度' in unit:
+            dialog = DegreePayDialog(self, payment_id=payment_id)
+        else:
+            dialog = UnitPayDialog(self, payment_id=payment_id)
+
+        if dialog.exec_() == dialog.Accepted:
             self.load_payments()
             self.load_unpaid()
     

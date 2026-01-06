@@ -118,6 +118,15 @@ class PaymentService:
         if db is None:
             db = SessionLocal()
         try:
+            # load charge item to handle unit-specific defaults (e.g., degree-based bills may omit dates)
+            charge_item = db.query(ChargeItem).filter(ChargeItem.id == charge_item_id).first()
+            charge_unit = (charge_item.unit or '').lower() if charge_item else ''
+            # If this is a degree-based bill and dates are not provided, default them to now
+            if '度' in charge_unit:
+                if billing_start_date is None:
+                    billing_start_date = datetime.now()
+                if billing_end_date is None:
+                    billing_end_date = billing_start_date
             # 计算并规范化 billing_months，确保与开始/结束日期一致
             def calc_months(start_date, end_date):
                 if not start_date or not end_date:
@@ -275,21 +284,49 @@ class PaymentService:
                     total_amt = float(payment.amount or 0.0)
                 except Exception:
                     total_amt = 0.0
+                # For unit-based payments (especially '度'), prefer computing total from unit * usage
+                if '度' in unit:
+                    try:
+                        total_amt = float(price * float(payment.usage or 0.0))
+                    except Exception:
+                        total_amt = float(payment.amount or 0.0)
+                    # also keep the stored payment.amount in sync if it differs
+                    try:
+                        if abs((payment.amount or 0.0) - total_amt) > 0.01:
+                            payment.amount = total_amt
+                    except Exception:
+                        pass
                 if payment.paid_amount >= total_amt:
                     payment.paid = 1
+                # 对于按单位的缴费（度/天/小时），在更新已缴金额后记录缴费时间、操作员、流水并返回
+                payment.paid_time = datetime.now()
+                payment.operator = operator
+                try:
+                    from services.payment_transaction_service import PaymentTransactionService
+                    if paid_amount_this_time and paid_amount_this_time > 0:
+                        PaymentTransactionService.create_transaction(payment_id=payment.id, amount=paid_amount_this_time, operator=operator, db=db)
+                except Exception:
+                    import traceback
+                    print("记录付款流水失败：", traceback.format_exc())
+                db.commit()
+                db.refresh(payment)
+                # 确保关联对象已加载
+                _ = payment.resident
+                _ = payment.charge_item
+                return payment
             else:
                 # 按月的旧逻辑：如果未指定缴费月数，则缴清全部
                 if paid_months is None:
                     paid_months = payment.billing_months - payment.paid_months
-                
+
                 # 检查缴费月数是否超过剩余未缴费月数
                 remaining_months = payment.billing_months - payment.paid_months
                 if paid_months > remaining_months:
                     raise ValueError(f"缴费月数不能超过剩余未缴费月数（剩余{remaining_months}月）")
-                
+
                 if paid_months <= 0:
                     raise ValueError("缴费月数必须大于0")
-                
+
                 # 计算本次缴费金额（按比例计算）
                 # 按月分摊并四舍五入到整数元（元）
                 try:
@@ -298,15 +335,15 @@ class PaymentService:
                     monthly_amount_raw = Decimal(str(float(payment.amount) / payment.billing_months))
                 monthly_amount = int(monthly_amount_raw.quantize(0, rounding=ROUND_HALF_UP))
                 paid_amount_this_time = int((monthly_amount_raw * Decimal(str(paid_months))).quantize(0, rounding=ROUND_HALF_UP))
-                
-                # 更新缴费信息
-                payment.paid_months += paid_months
-                # 累加已交金额（保持为数值）
-                try:
-                    prev_paid = Decimal(str(payment.paid_amount or 0))
-                except Exception:
-                    prev_paid = Decimal(str(float(payment.paid_amount or 0.0)))
-                payment.paid_amount = float((prev_paid + Decimal(str(paid_amount_this_time))))
+            
+            # 更新缴费信息
+            payment.paid_months += paid_months
+            # 累加已交金额（保持为数值）
+            try:
+                prev_paid = Decimal(str(payment.paid_amount or 0))
+            except Exception:
+                prev_paid = Decimal(str(float(payment.paid_amount or 0.0)))
+            payment.paid_amount = float((prev_paid + Decimal(str(paid_amount_this_time))))
 
             # 记录最近一次缴费时间（即便是部分缴费也记录时间）
             payment.paid_time = datetime.now()
@@ -393,7 +430,7 @@ class PaymentService:
             payment = db.query(Payment).filter(Payment.id == payment_id).first()
             if not payment:
                 raise ValueError("缴费记录不存在")
-
+            
             db.delete(payment)
             db.commit()
             logger.log_operation("DELETE_PAYMENT_SUCCESS", f"Deleted payment id={payment_id}")

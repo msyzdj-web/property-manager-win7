@@ -317,7 +317,26 @@ class PaymentDialog(QDialog):
                 self.manual_amount_input.setVisible(charge_item.charge_type == 'manual')
                 if charge_item.charge_type != 'manual':
                     self.manual_amount_input.setValue(0.0)
-        
+                # 如果按度计费，则显示用量输入并隐藏日期；按小时/天显示日期并相应显示单位
+                unit = (charge_item.unit or '').lower()
+                if '度' in unit:
+                    # hide start/end date controls, show usage input
+                    self.billing_start_date.setVisible(False)
+                    self.billing_end_date.setVisible(False)
+                    self.usage_input.setVisible(True)
+                    self.usage_input.setSuffix(' 度')
+                else:
+                    # show dates, hide usage by default
+                    self.billing_start_date.setVisible(True)
+                    self.billing_end_date.setVisible(True)
+                    self.usage_input.setVisible(True)  # keep usage visible as optional for hours too
+                    if '小时' in unit or '时' in unit:
+                        self.usage_input.setSuffix(' 小时')
+                    elif '天' in unit or '日' in unit:
+                        self.usage_input.setSuffix(' 天')
+                    else:
+                        self.usage_input.setSuffix(' ')
+
         self.calculate_amount()
     
     def calculate_amount(self):
@@ -404,22 +423,27 @@ class PaymentDialog(QDialog):
         date = self.period_date.date()
         period = f"{date.year():04d}-{date.month():02d}"
         
-        # 获取计费日期
-        billing_start_date = self.billing_start_date.dateTime().toPyDateTime()
-        billing_end_date = self.billing_end_date.dateTime().toPyDateTime()
-        
-        if billing_end_date < billing_start_date:
-            QMessageBox.warning(self, '提示', '计费结束日期不能早于开始日期')
-            return
-        
-        # 计算计费周期数
-        months = (billing_end_date.year - billing_start_date.year) * 12 + (billing_end_date.month - billing_start_date.month)
-        if billing_end_date.day >= billing_start_date.day:
-            months += 1
-        
-        if months <= 0:
-            QMessageBox.warning(self, '提示', '计费周期数必须大于0')
-            return
+        # 先计算计费周期或用量（由 calculate_billing_months 设置 _computed_billing_*）
+        self.calculate_billing_months()
+        computed_unit = getattr(self, '_computed_billing_unit', '月')
+        computed_count = getattr(self, '_computed_billing_count', None)
+
+        # 对于按度计费，不要求开始/结束日期，使用用量即可
+        if computed_unit == '度':
+            billing_start_date = None
+            billing_end_date = None
+            months = 0
+        else:
+            billing_start_date = self.billing_start_date.dateTime().toPyDateTime()
+            billing_end_date = self.billing_end_date.dateTime().toPyDateTime()
+            if billing_end_date < billing_start_date:
+                QMessageBox.warning(self, '提示', '计费结束日期不能早于开始日期')
+                return
+            # 计算计费周期数（以月为单位存储）
+            months = int(computed_count) if computed_unit == '月' else int(computed_count)
+            if months <= 0:
+                QMessageBox.warning(self, '提示', '计费周期数必须大于0')
+                return
         
         # 计算金额
         try:
@@ -442,12 +466,14 @@ class PaymentDialog(QDialog):
             else:
                 billing_start_date_py = billing_start_date
                 billing_end_date_py = billing_end_date
+                usage_for_calc = float(self.usage_input.value()) if hasattr(self, 'usage_input') and self.usage_input.value() > 0 else None
                 amount = ChargeService.calculate_amount(
                     charge_item,
                     resident_area=float(resident.area) if resident.area else 0.0,
                     months=months,
                     billing_start_date=billing_start_date_py,
-                    billing_end_date=billing_end_date_py
+                    billing_end_date=billing_end_date_py,
+                    usage=usage_for_calc
                 )
             
             # 获取用量（如果适用）

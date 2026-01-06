@@ -1116,7 +1116,7 @@ class ReceiptPrinter:
     def _render_receipt_to_image_pil(self, payment, output_path, dpi=300, payment_date_str: str = None, payment_seq: int = None):
         """回退：使用 Pillow 生成简单的收据预览（在无法使用 Qt 绘制时使用）"""
         try:
-            from PIL import Image, ImageDraw, ImageFont
+            from PIL import Image, ImageDraw, ImageFont  # pyright: ignore[reportMissingImports]
             # 简易布局：以像素为单位，按 dpi 计算尺寸
             mm_per_inch = 25.4
             # 仅支持收据纸 (241×93mm)
