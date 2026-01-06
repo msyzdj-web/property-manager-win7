@@ -308,25 +308,13 @@ class ReceiptPrinter:
                     return False
                 try:
                     image = QImage(tmp_png)
-                    # 记录诊断信息，帮助定位 Win 打包后驱动差异问题（导出到 exports 目录）
+                    # 记录最小诊断信息以避免复杂嵌套 try/except 导致语法问题
                     try:
-                        diag = {}
-                        diag['dpi'] = dpi
-                        try:
-                            pr = self.printer.pageRect()
-                            diag['page_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(pr.width()), 'h': int(pr.height())}
-                            # 记录我们用于实际绘制的矩形大小（便于诊断）
-                            try:
-                                # 使用实际渲染的图片大小与打印机 pageRect 取交集作为有效绘制区域
-                                effective_w = min(image.width(), int(pr.width()))
-                                effective_h = min(image.height(), int(pr.height()))
-                                diag['effective_draw_rect'] = {'x': int(pr.x()), 'y': int(pr.y()), 'w': int(effective_w), 'h': int(effective_h)}
-                            except Exception:
-                                diag['effective_draw_rect'] = None
-                        except Exception:
-                            diag['page_rect'] = None
-                        diag['image_size'] = {'w': image.width(), 'h': image.height()}
-                        diag['target_mm'] = {'w_mm': self._target_w_mm, 'h_mm': self._target_h_mm}
+                        diag = {
+                            'dpi': dpi,
+                            'image_size': {'w': image.width(), 'h': image.height()},
+                            'target_mm': {'w_mm': self._target_w_mm, 'h_mm': self._target_h_mm}
+                        }
                         exports_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'exports'))
                         try:
                             os.makedirs(exports_dir, exist_ok=True)
