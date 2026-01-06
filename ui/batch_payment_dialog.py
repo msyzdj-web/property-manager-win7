@@ -51,10 +51,35 @@ class BatchPaymentWorker(QThread):
                     # 手动类型需要跳过或使用默认值
                     amount = 0.0
                 else:
+                    # Prepare billing start/end as datetimes (ChargeService expects datetimes for hour/day calc)
+                    from datetime import datetime, time
+                    b_start = self.billing_start_date
+                    b_end = self.billing_end_date
+                    # If passed as date, convert to datetime at start/end of day
+                    try:
+                        # detect date (has year/month/day but not hour)
+                        if hasattr(b_start, 'year') and not hasattr(b_start, 'hour'):
+                            b_start_dt = datetime(b_start.year, b_start.month, b_start.day, 0, 0, 0)
+                        else:
+                            b_start_dt = b_start
+                    except Exception:
+                        b_start_dt = None
+                    try:
+                        if hasattr(b_end, 'year') and not hasattr(b_end, 'hour'):
+                            # end of day to include full day range
+                            b_end_dt = datetime(b_end.year, b_end.month, b_end.day, 23, 59, 59)
+                        else:
+                            b_end_dt = b_end
+                    except Exception:
+                        b_end_dt = None
+
                     amount = ChargeService.calculate_amount(
                         charge_item,
                         resident_area=float(resident.area) if resident.area else 0.0,
-                        months=self.billing_months
+                        months=self.billing_months,
+                        billing_start_date=b_start_dt,
+                        billing_end_date=b_end_dt,
+                        usage=None
                     )
                 
                 # 创建账单
