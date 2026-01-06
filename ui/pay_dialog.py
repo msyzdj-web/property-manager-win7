@@ -138,7 +138,15 @@ class PayDialog(QDialog):
                 self.paid_months_input.setMaximum(remaining_months)
                 if remaining_months > 0:
                     self.paid_months_input.setValue(1)
-            info_text = (\n+                f\"住户: {getattr(payment.resident, 'full_room_no', payment.resident.room_no)} - {payment.resident.name}\\n\"\n+                f\"收费项目: {payment.charge_item.name}\\n\"\n+                f\"计费周期: {payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}\\n\"\n+                f\"总周期: {total_display}\\n\"\n+                f\"已缴费: {paid_display}\\n\"\n+                f\"剩余: {remaining_display}\\n\"\n+                f\"总金额: ¥{float(payment.amount):.2f}\"\n+            )\n*** End Patch
+            info_text = (
+                f"住户: {getattr(payment.resident, 'full_room_no', payment.resident.room_no)} - {payment.resident.name}\n"
+                f"收费项目: {payment.charge_item.name}\n"
+                f"计费周期: {payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}\n"
+                f"总周期: {total_display}\n"
+                f"已缴费: {paid_display}\n"
+                f"剩余: {remaining_display}\n"
+                f"总金额: ¥{float(payment.amount):.2f}"
+            )
             self.info_label.setText(info_text)
             self.payment = payment
             self.calculate_paid_amount()
@@ -164,8 +172,10 @@ class PayDialog(QDialog):
                     return
                 # if unit is month-like, pass as paid_months; else pass as paid_units
                 if ('小时' in unit or '时' in unit) or ('天' in unit or '日' in unit):
-                    PaymentService.mark_paid(self.payment_id, paid_units=paid_units_int, operator='管理员')
-                    QMessageBox.information(self, '成功', f'缴费成功（{paid_units_int} {\"小时\" if \"小时\" in unit or \"时\" in unit else \"天\"}）')
+                PaymentService.mark_paid(self.payment_id, paid_units=paid_units_int, operator='管理员')
+                # compute unit label safely (avoid backslashes/quotes inside f-string expression)
+                unit_label = '小时' if ('小时' in unit or '时' in unit) else '天'
+                QMessageBox.information(self, '成功', f'缴费成功（{paid_units_int} {unit_label}）')
                 else:
                     PaymentService.mark_paid(self.payment_id, paid_months=paid_units_int, operator='管理员')
                     QMessageBox.information(self, '成功', f'缴费成功（{paid_units_int} 个月）')
