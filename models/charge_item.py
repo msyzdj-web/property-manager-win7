@@ -37,6 +37,18 @@ class ChargeItem(Base):
     
     def get_charge_type_name(self):
         """获取收费类型名称"""
+        # Prefer explicit mapping, but if a 'fixed' charge uses a unit that implies
+        # a different billing mode (度/小时/天) expose that in the UI.
+        if self.charge_type == 'fixed':
+            unit_lower = (self.unit or '').lower()
+            if '度' in unit_lower:
+                return '按度数'
+            if '时' in unit_lower or '小时' in unit_lower:
+                return '按时间'
+            if '天' in unit_lower or '日' in unit_lower:
+                return '按天数'
+            return '固定'
+
         type_map = {
             'fixed': '固定',
             'area': '按面积',
