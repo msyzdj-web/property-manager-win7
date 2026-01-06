@@ -3,8 +3,8 @@
 """
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
                              QPushButton, QMessageBox, QComboBox, QDoubleSpinBox,
-                             QDateTimeEdit, QGroupBox, QSpinBox, QCompleter)
-from PyQt5.QtCore import Qt, QDateTime
+                             QDateTimeEdit, QDateEdit, QGroupBox, QSpinBox, QCompleter)
+from PyQt5.QtCore import Qt, QDateTime, QDate
 from datetime import datetime, timedelta
 
 from services.resident_service import ResidentService
@@ -17,9 +17,11 @@ class PaymentDialog(QDialog):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.payment_id = None
         self.init_ui()
         self.load_residents()
         self.load_charge_items()
+        # 如果以编辑模式打开，外部可先设置 self.payment_id 再调用 load_payment()
     
     def init_ui(self):
         """初始化UI"""
@@ -166,6 +168,50 @@ class PaymentDialog(QDialog):
                 self.charge_combo.addItem(f"{item.name} ({item.get_charge_type_name()})", item.id)
         except Exception as e:
             QMessageBox.critical(self, '错误', f'加载收费项目列表失败：{str(e)}')
+    
+    def load_payment(self, payment_id: int):
+        """以编辑模式加载已有账单数据"""
+        try:
+            payment = PaymentService.get_payment_by_id(payment_id)
+            if not payment:
+                raise ValueError("账单不存在")
+            self.payment_id = payment_id
+            # 选择住户
+            idx = self.resident_combo.findData(payment.resident_id)
+            if idx >= 0:
+                self.resident_combo.setCurrentIndex(idx)
+            # 选择收费项目
+            cidx = self.charge_combo.findData(payment.charge_item_id)
+            if cidx >= 0:
+                self.charge_combo.setCurrentIndex(cidx)
+            # 填写日期与用量
+            if payment.billing_start_date:
+                self.billing_start_date.setDateTime(QDateTime(payment.billing_start_date.year, payment.billing_start_date.month, payment.billing_start_date.day, payment.billing_start_date.hour if hasattr(payment.billing_start_date, 'hour') else 0, payment.billing_start_date.minute if hasattr(payment.billing_start_date, 'minute') else 0))
+            if payment.billing_end_date:
+                self.billing_end_date.setDateTime(QDateTime(payment.billing_end_date.year, payment.billing_end_date.month, payment.billing_end_date.day, payment.billing_end_date.hour if hasattr(payment.billing_end_date, 'hour') else 0, payment.billing_end_date.minute if hasattr(payment.billing_end_date, 'minute') else 0))
+            if payment.usage is not None:
+                try:
+                    self.usage_input.setValue(float(payment.usage))
+                except Exception:
+                    pass
+            # 周期
+            if payment.period:
+                try:
+                    y, m = payment.period.split('-')
+                    self.period_date.setDate(QDate(int(y), int(m), 1))
+                except Exception:
+                    pass
+            # 手动金额显示
+            if payment.charge_item and payment.charge_item.charge_type == 'manual':
+                self.manual_amount_input.setVisible(True)
+                try:
+                    self.manual_amount_input.setValue(float(payment.amount))
+                except Exception:
+                    pass
+            # 更改按钮文本为保存修改
+            self.save_btn.setText('保存修改')
+        except Exception as e:
+            QMessageBox.critical(self, '错误', f'加载账单失败：{str(e)}')
     
     def on_resident_changed(self):
         """住户改变时的处理"""
@@ -344,18 +390,34 @@ class PaymentDialog(QDialog):
             if hasattr(self, 'usage_input') and self.usage_input.value() > 0:
                 usage_val = float(self.usage_input.value())
 
-            PaymentService.create_payment(
-                resident_id=resident_id,
-                charge_item_id=charge_item_id,
-                period=period,
-                billing_start_date=billing_start_date,
-                billing_end_date=billing_end_date,
-                billing_months=months,
-                amount=amount,
-                usage=usage_val
-            )
-            QMessageBox.information(self, '成功', f'账单生成成功（{months}个月）')
-            self.accept()
+            if self.payment_id:
+                # 更新现有账单
+                PaymentService.update_payment(
+                    payment_id=self.payment_id,
+                    resident_id=resident_id,
+                    charge_item_id=charge_item_id,
+                    period=period,
+                    billing_start_date=billing_start_date,
+                    billing_end_date=billing_end_date,
+                    billing_months=months,
+                    amount=amount,
+                    usage=usage_val
+                )
+                QMessageBox.information(self, '成功', f'账单已更新（{months}个月）')
+                self.accept()
+            else:
+                PaymentService.create_payment(
+                    resident_id=resident_id,
+                    charge_item_id=charge_item_id,
+                    period=period,
+                    billing_start_date=billing_start_date,
+                    billing_end_date=billing_end_date,
+                    billing_months=months,
+                    amount=amount,
+                    usage=usage_val
+                )
+                QMessageBox.information(self, '成功', f'账单生成成功（{months}个月）')
+                self.accept()
         except ValueError as e:
             QMessageBox.warning(self, '提示', str(e))
         except Exception as e:

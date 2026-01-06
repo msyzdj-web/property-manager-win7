@@ -314,12 +314,14 @@ class MainWindow(QMainWindow):
         # 工具栏
         toolbar_layout = QHBoxLayout()
         self.add_payment_btn = QPushButton('生成账单')
+        self.edit_payment_btn = QPushButton('编辑账单')
         self.mark_paid_btn = QPushButton('缴费')
         self.delete_payment_btn = QPushButton('批量删除')
         self.print_receipt_btn = QPushButton('打印收据')
         self.refresh_payment_btn = QPushButton('刷新')
         
         self.add_payment_btn.clicked.connect(self.add_payment)
+        self.edit_payment_btn.clicked.connect(self.edit_payment)
         self.mark_paid_btn.clicked.connect(self.mark_payment_paid)
         self.delete_payment_btn.clicked.connect(self.delete_payment)
         self.print_receipt_btn.clicked.connect(self.print_receipt)
@@ -334,6 +336,7 @@ class MainWindow(QMainWindow):
         self.report_btn = QPushButton('生成报表')
         
         toolbar_layout.addWidget(self.add_payment_btn)
+        toolbar_layout.addWidget(self.edit_payment_btn)
         toolbar_layout.addWidget(self.batch_payment_btn)
         toolbar_layout.addWidget(self.mark_paid_btn)
         toolbar_layout.addWidget(self.delete_payment_btn)
@@ -705,6 +708,25 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.log_error(e, "UI_ADD_PAYMENT")
             QMessageBox.critical(self, '错误', f'生成账单失败：{str(e)}')
+
+    def edit_payment(self):
+        """编辑选中的账单"""
+        try:
+            selected_rows = self.payment_table.selectedItems()
+            if not selected_rows:
+                QMessageBox.warning(self, '提示', '请选择要编辑的账单')
+                return
+
+            payment_id = int(self.payment_table.item(selected_rows[0].row(), 0).text())
+            dialog = PaymentDialog(self)
+            # 加载账单到对话框以编辑
+            dialog.load_payment(payment_id)
+            if dialog.exec_() == PaymentDialog.Accepted:
+                self.load_periods()
+                self.load_payments()
+        except Exception as e:
+            logger.log_error(e, "UI_EDIT_PAYMENT")
+            QMessageBox.critical(self, '错误', f'编辑账单失败：{str(e)}')
     
     def mark_payment_paid(self):
         """标记已缴费（支持部分缴费）"""
