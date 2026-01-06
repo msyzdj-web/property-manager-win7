@@ -315,7 +315,7 @@ class MainWindow(QMainWindow):
         toolbar_layout = QHBoxLayout()
         self.add_payment_btn = QPushButton('生成账单')
         self.mark_paid_btn = QPushButton('缴费')
-        self.delete_payment_btn = QPushButton('删除账单')
+        self.delete_payment_btn = QPushButton('批量删除')
         self.print_receipt_btn = QPushButton('打印收据')
         self.refresh_payment_btn = QPushButton('刷新')
         
@@ -742,20 +742,21 @@ class MainWindow(QMainWindow):
                                      QMessageBox.Yes | QMessageBox.No)
             if reply == QMessageBox.Yes:
                 logger.log_operation("UI_DELETE_PAYMENT_CONFIRMED", f"payment_ids={payment_ids}")
-                failed = []
-                for pid in payment_ids:
-                    try:
-                        PaymentService.delete_payment(pid)
-                    except Exception as e:
-                        logger.log_error(e, f"UI_DELETE_PAYMENT_SINGLE_FAILED: payment_id={pid}")
-                        failed.append((pid, str(e)))
-                if not failed:
-                    logger.log_operation("UI_DELETE_PAYMENT_SUCCESS", f"deleted {len(payment_ids)} payments")
-                    QMessageBox.information(self, '成功', '已删除选中账单')
-                else:
-                    logger.log_operation("UI_DELETE_PAYMENT_PARTIAL", f"failed {len(failed)} out of {len(payment_ids)}")
-                    msgs = "\n".join([f"{pid}: {err}" for pid, err in failed])
-                    QMessageBox.warning(self, '部分失败', f'部分账单删除失败：\n{msgs}')
+                try:
+                    # 使用批量删除以避免死锁和提高性能
+                    deleted_count, failed = PaymentService.delete_payments_batch(payment_ids)
+
+                    if not failed:
+                        logger.log_operation("UI_DELETE_PAYMENT_SUCCESS", f"deleted {deleted_count} payments")
+                        QMessageBox.information(self, '成功', f'已删除 {deleted_count} 个账单')
+                    else:
+                        logger.log_operation("UI_DELETE_PAYMENT_PARTIAL", f"deleted {deleted_count}, failed {len(failed)}")
+                        msgs = "\n".join([f"{pid}: {err}" for pid, err in failed])
+                        QMessageBox.warning(self, '部分失败', f'成功删除 {deleted_count} 个账单，失败 {len(failed)} 个：\n{msgs}')
+                except Exception as e:
+                    logger.log_error(e, "UI_DELETE_PAYMENT_BATCH_FAILED")
+                    QMessageBox.critical(self, '错误', f'删除账单时发生错误：{str(e)}')
+
                 self.load_payments()
                 self.load_unpaid()
             else:

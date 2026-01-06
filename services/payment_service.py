@@ -275,13 +275,16 @@ class PaymentService:
         """删除缴费记录"""
         logger.log_operation("DELETE_PAYMENT_START", f"payment_id={payment_id}")
 
+        close_db = False
         if db is None:
             db = SessionLocal()
+            close_db = True
+
         try:
             payment = db.query(Payment).filter(Payment.id == payment_id).first()
             if not payment:
                 raise ValueError("缴费记录不存在")
-            
+
             db.delete(payment)
             db.commit()
             logger.log_operation("DELETE_PAYMENT_SUCCESS", f"Deleted payment id={payment_id}")
@@ -291,7 +294,47 @@ class PaymentService:
             db.rollback()
             raise e
         finally:
-            if db is not None:
+            if close_db and db is not None:
+                db.close()
+
+    @staticmethod
+    def delete_payments_batch(payment_ids: list, db: Session = None):
+        """批量删除缴费记录（使用单个数据库会话以提高性能和避免死锁）"""
+        logger.log_operation("DELETE_PAYMENTS_BATCH_START", f"payment_ids={payment_ids}")
+
+        close_db = False
+        if db is None:
+            db = SessionLocal()
+            close_db = True
+
+        try:
+            deleted_count = 0
+            failed_deletes = []
+
+            for payment_id in payment_ids:
+                try:
+                    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+                    if payment:
+                        db.delete(payment)
+                        deleted_count += 1
+                        logger.log_operation("DELETE_PAYMENT_BATCH_ITEM_SUCCESS", f"payment_id={payment_id}")
+                    else:
+                        failed_deletes.append((payment_id, "缴费记录不存在"))
+                        logger.log_error(ValueError("缴费记录不存在"), f"DELETE_PAYMENT_BATCH_ITEM_NOT_FOUND: payment_id={payment_id}")
+                except Exception as e:
+                    failed_deletes.append((payment_id, str(e)))
+                    logger.log_error(e, f"DELETE_PAYMENT_BATCH_ITEM_FAILED: payment_id={payment_id}")
+
+            db.commit()
+            logger.log_operation("DELETE_PAYMENTS_BATCH_SUCCESS", f"deleted={deleted_count}, failed={len(failed_deletes)}")
+            return deleted_count, failed_deletes
+
+        except Exception as e:
+            logger.log_error(e, "DELETE_PAYMENTS_BATCH_FAILED")
+            db.rollback()
+            raise e
+        finally:
+            if close_db and db is not None:
                 db.close()
     
     @staticmethod

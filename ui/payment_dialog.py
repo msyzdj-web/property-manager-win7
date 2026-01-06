@@ -294,8 +294,8 @@ class PaymentDialog(QDialog):
         period = f"{date.year():04d}-{date.month():02d}"
         
         # 获取计费日期
-        billing_start_date = self.billing_start_date.date().toPyDate()
-        billing_end_date = self.billing_end_date.date().toPyDate()
+        billing_start_date = self.billing_start_date.dateTime().toPyDateTime()
+        billing_end_date = self.billing_end_date.dateTime().toPyDateTime()
         
         if billing_end_date < billing_start_date:
             QMessageBox.warning(self, '提示', '计费结束日期不能早于开始日期')
@@ -339,6 +339,11 @@ class PaymentDialog(QDialog):
                     billing_end_date=billing_end_date_py
                 )
             
+            # 获取用量（如果适用）
+            usage_val = None
+            if hasattr(self, 'usage_input') and self.usage_input.value() > 0:
+                usage_val = float(self.usage_input.value())
+
             PaymentService.create_payment(
                 resident_id=resident_id,
                 charge_item_id=charge_item_id,
@@ -346,7 +351,8 @@ class PaymentDialog(QDialog):
                 billing_start_date=billing_start_date,
                 billing_end_date=billing_end_date,
                 billing_months=months,
-                amount=amount
+                amount=amount,
+                usage=usage_val
             )
             QMessageBox.information(self, '成功', f'账单生成成功（{months}个月）')
             self.accept()
