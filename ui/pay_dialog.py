@@ -153,6 +153,32 @@ class PayDialog(QDialog):
         except Exception as e:
             self.amount_label.setText('缴费金额: ¥0.00')
     
+    def calculate_paid_amount(self):
+        """计算缴费金额（单位感知）"""
+        try:
+            if not hasattr(self, 'payment'):
+                return
+            unit = (self.payment.charge_item.unit or '').lower() if self.payment.charge_item else ''
+            price = float(self.payment.charge_item.price) if self.payment.charge_item and self.payment.charge_item.price is not None else 0.0
+
+            if '度' in unit and self.paid_double_input.isVisible():
+                units = float(self.paid_double_input.value())
+                paid_amount = price * units
+            else:
+                units = int(self.paid_months_input.value())
+                if '小时' in unit or '时' in unit or '天' in unit or '日' in unit or '度' in unit:
+                    paid_amount = price * units
+                else:
+                    try:
+                        monthly_amount = float(self.payment.amount) / self.payment.billing_months
+                    except Exception:
+                        monthly_amount = 0.0
+                    paid_amount = monthly_amount * units
+
+            self.amount_label.setText(f'缴费金额: ¥{paid_amount:.2f}')
+        except Exception:
+            self.amount_label.setText('缴费金额: ¥0.00')
+    
     def pay(self):
         """确认缴费"""
         try:
