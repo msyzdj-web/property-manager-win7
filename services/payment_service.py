@@ -2,6 +2,7 @@
 缴费管理服务
 """
 from datetime import datetime
+import math
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func
 from models.payment import Payment
@@ -216,12 +217,17 @@ class PaymentService:
                 db.close()
     
     @staticmethod
-    def mark_paid(payment_id: int, paid_months: int = None, operator: str = '', db: Session = None):
+    def mark_paid(payment_id: int, paid_months: int = None, paid_units: float = None, operator: str = '', db: Session = None):
         """标记为已缴费（支持部分缴费）
+        
+        支持两种模式：
+        - 按月缴费（兼容原逻辑）：传入 paid_months（int）
+        - 按单位缴费（度/天/小时）：传入 paid_units（float），函数会根据 payment.charge_item.unit 将其转换为金额
         
         Args:
             payment_id: 缴费记录ID
             paid_months: 缴费周期数（月数），如果为None则缴清全部
+            paid_units: 按收费单位的数量（如度/小时/天），优先于 paid_months
             operator: 操作员
         """
         if db is None:
@@ -235,35 +241,72 @@ class PaymentService:
             if not payment:
                 raise ValueError("缴费记录不存在")
             
-            # 如果未指定缴费月数，则缴清全部
-            if paid_months is None:
-                paid_months = payment.billing_months - payment.paid_months
-            
-            # 检查缴费月数是否超过剩余未缴费月数
-            remaining_months = payment.billing_months - payment.paid_months
-            if paid_months > remaining_months:
-                raise ValueError(f"缴费月数不能超过剩余未缴费月数（剩余{remaining_months}月）")
-            
-            if paid_months <= 0:
-                raise ValueError("缴费月数必须大于0")
-            
-            # 计算本次缴费金额（按比例计算）
-            # 按月分摊并四舍五入到整数元（元）
-            try:
-                monthly_amount_raw = Decimal(str(payment.amount)) / Decimal(str(payment.billing_months))
-            except Exception:
-                monthly_amount_raw = Decimal(str(float(payment.amount) / payment.billing_months))
-            monthly_amount = int(monthly_amount_raw.quantize(0, rounding=ROUND_HALF_UP))
-            paid_amount_this_time = int((monthly_amount_raw * Decimal(str(paid_months))).quantize(0, rounding=ROUND_HALF_UP))
-            
-            # 更新缴费信息
-            payment.paid_months += paid_months
-            # 累加已交金额（保持为数值）
-            try:
-                prev_paid = Decimal(str(payment.paid_amount or 0))
-            except Exception:
-                prev_paid = Decimal(str(float(payment.paid_amount or 0.0)))
-            payment.paid_amount = float((prev_paid + Decimal(str(paid_amount_this_time))))
+            # 如果传入 paid_units，则按收费单位计算本次缴费金额（degree/hour/day）
+            paid_amount_this_time = 0
+            if paid_units is not None:
+                unit = (payment.charge_item.unit or '').lower() if payment.charge_item else ''
+                price = float(payment.charge_item.price) if payment.charge_item and payment.charge_item.price is not None else 0.0
+                # 小时：向上取整到小时
+                if ('小时' in unit or '时' in unit):
+                    units_to_pay = int(math.ceil(float(paid_units)))
+                # 天：按天数向上取整
+                elif ('天' in unit or '日' in unit):
+                    units_to_pay = int(math.ceil(float(paid_units)))
+                # 度：支持小数
+                elif '度' in unit:
+                    units_to_pay = float(paid_units)
+                else:
+                    # 回退到按月逻辑（将 paid_units 视作月数）
+                    units_to_pay = int(math.ceil(float(paid_units)))
+
+                # 计算金额并四舍五入到整数元
+                try:
+                    paid_amount_this_time = int(Decimal(str(price * float(units_to_pay))).quantize(0, rounding=ROUND_HALF_UP))
+                except Exception:
+                    paid_amount_this_time = int(round(price * float(units_to_pay)))
+                # 更新已缴金额与已缴月数/标记（已缴单位信息通过 paid_amount/单价 反推显示）
+                try:
+                    prev_paid = Decimal(str(payment.paid_amount or 0))
+                except Exception:
+                    prev_paid = Decimal(str(float(payment.paid_amount or 0.0)))
+                payment.paid_amount = float((prev_paid + Decimal(str(paid_amount_this_time))))
+                # 如果已缴金额覆盖总金额，则标记已缴清
+                try:
+                    total_amt = float(payment.amount or 0.0)
+                except Exception:
+                    total_amt = 0.0
+                if payment.paid_amount >= total_amt:
+                    payment.paid = 1
+            else:
+                # 按月的旧逻辑：如果未指定缴费月数，则缴清全部
+                if paid_months is None:
+                    paid_months = payment.billing_months - payment.paid_months
+                
+                # 检查缴费月数是否超过剩余未缴费月数
+                remaining_months = payment.billing_months - payment.paid_months
+                if paid_months > remaining_months:
+                    raise ValueError(f"缴费月数不能超过剩余未缴费月数（剩余{remaining_months}月）")
+                
+                if paid_months <= 0:
+                    raise ValueError("缴费月数必须大于0")
+                
+                # 计算本次缴费金额（按比例计算）
+                # 按月分摊并四舍五入到整数元（元）
+                try:
+                    monthly_amount_raw = Decimal(str(payment.amount)) / Decimal(str(payment.billing_months))
+                except Exception:
+                    monthly_amount_raw = Decimal(str(float(payment.amount) / payment.billing_months))
+                monthly_amount = int(monthly_amount_raw.quantize(0, rounding=ROUND_HALF_UP))
+                paid_amount_this_time = int((monthly_amount_raw * Decimal(str(paid_months))).quantize(0, rounding=ROUND_HALF_UP))
+                
+                # 更新缴费信息
+                payment.paid_months += paid_months
+                # 累加已交金额（保持为数值）
+                try:
+                    prev_paid = Decimal(str(payment.paid_amount or 0))
+                except Exception:
+                    prev_paid = Decimal(str(float(payment.paid_amount or 0.0)))
+                payment.paid_amount = float((prev_paid + Decimal(str(paid_amount_this_time))))
 
             # 记录最近一次缴费时间（即便是部分缴费也记录时间）
             payment.paid_time = datetime.now()
@@ -288,6 +331,15 @@ class PaymentService:
             # 确保关联对象已加载
             _ = payment.resident
             _ = payment.charge_item
+            # 记录流水（使用同一 db session） - paid_amount_this_time 必须在此之前计算
+            try:
+                from services.payment_transaction_service import PaymentTransactionService
+                if paid_amount_this_time and paid_amount_this_time > 0:
+                    PaymentTransactionService.create_transaction(payment_id=payment.id, amount=paid_amount_this_time, operator=operator, db=db)
+            except Exception:
+                # 流水失败不应该阻止主流程，记录但继续
+                import traceback
+                print("记录付款流水失败：", traceback.format_exc())
             return payment
         except Exception as e:
             db.rollback()
@@ -436,11 +488,7 @@ class PaymentService:
                     (ChargeItem.name.like(keyword_like))
                 )
             
-            try:
-                # Order by resident.room_no to match the natural table ordering shown in the main UI
-                return query.order_by(Resident.room_no, Payment.created_at.desc()).all()
-            except Exception:
-                return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
+            return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
         finally:
             if db is not None:
                 db.close()
