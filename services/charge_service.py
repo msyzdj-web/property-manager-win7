@@ -146,7 +146,7 @@ class ChargeService:
 
         if charge_item.charge_type == 'fixed':
             # 根据单位决定计费方式：元/日、元/月、元/年
-            if '日' in unit:
+            if '日' in unit or '天' in unit:
                 # 按天计费，需要起止日期
                 if billing_start_date and billing_end_date:
                     days = (billing_end_date - billing_start_date).days + 1
@@ -194,7 +194,7 @@ class ChargeService:
                 return _round_to_int(val)
         elif charge_item.charge_type == 'area':
             # 按面积计费，单位同样支持日/月/年
-            if '日' in unit:
+            if '日' in unit or '天' in unit:
                 if billing_start_date and billing_end_date:
                     days = (billing_end_date - billing_start_date).days + 1
                     val = price * resident_area * days
