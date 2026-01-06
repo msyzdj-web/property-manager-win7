@@ -375,6 +375,7 @@ class PaymentService:
                 query = query.join(Resident).join(ChargeItem).filter(
                     (Resident.room_no.like(keyword_like)) |
                     (Resident.name.like(keyword_like)) |
+                    (Resident.phone.like(keyword_like)) |
                     (ChargeItem.name.like(keyword_like))
                 )
             

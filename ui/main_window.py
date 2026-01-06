@@ -1034,8 +1034,9 @@ class MainWindow(QMainWindow):
                         continue
                     name = (p.resident.name or '').lower()
                     room = (p.resident.room_no or '').lower()
+                    phone = (p.resident.phone or '').lower()
                     item = (p.charge_item.name or '').lower() if p.charge_item else ''
-                    if keyword in name or keyword in room or keyword in item:
+                    if keyword in name or keyword in room or keyword in phone or keyword in item:
                         filtered.append(p)
                 except Exception:
                     # 如果访问字段出错，忽略该记录
