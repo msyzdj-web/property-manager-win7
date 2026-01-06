@@ -806,14 +806,34 @@ class MainWindow(QMainWindow):
             self.payment_table.setRowCount(len(payments))
             
             for row, payment in enumerate(payments):
+                # Match the same columns/format as load_payments to avoid misalignment
                 self.payment_table.setItem(row, 0, QTableWidgetItem(str(payment.id)))
                 self.payment_table.setItem(row, 1, QTableWidgetItem(getattr(payment.resident, 'full_room_no', payment.resident.room_no)))
                 self.payment_table.setItem(row, 2, QTableWidgetItem(payment.resident.name))
                 self.payment_table.setItem(row, 3, QTableWidgetItem(payment.charge_item.name))
-                self.payment_table.setItem(row, 4, QTableWidgetItem(payment.period))
-                self.payment_table.setItem(row, 5, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
-                self.payment_table.setItem(row, 6, QTableWidgetItem('已缴费' if payment.paid == 1 else '未缴费'))
-                self.payment_table.setItem(row, 7, QTableWidgetItem(
+                # 计费周期显示：优先显示起止日期范围，否则显示 period 文本
+                billing_period = f"{payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}" if payment.billing_start_date and payment.billing_end_date else payment.period
+                self.payment_table.setItem(row, 4, QTableWidgetItem(billing_period))
+                # 总月数 / 已缴月数 / 金额 / 已缴金额 / 状态 / 缴费时间
+                try:
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(f"{payment.billing_months} 月"))
+                except Exception:
+                    self.payment_table.setItem(row, 5, QTableWidgetItem(''))
+                try:
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(f"{payment.paid_months} 月"))
+                except Exception:
+                    self.payment_table.setItem(row, 6, QTableWidgetItem(''))
+                self.payment_table.setItem(row, 7, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
+                self.payment_table.setItem(row, 8, QTableWidgetItem(self._fmt_amount_int(payment.paid_amount)))
+                # 缴费状态文本
+                if getattr(payment, 'paid', 0) == 1:
+                    status_text = '已缴费'
+                elif getattr(payment, 'paid_months', 0) > 0:
+                    status_text = f'部分缴费({payment.paid_months}/{payment.billing_months})'
+                else:
+                    status_text = '未缴费'
+                self.payment_table.setItem(row, 9, QTableWidgetItem(status_text))
+                self.payment_table.setItem(row, 10, QTableWidgetItem(
                     payment.paid_time.strftime('%Y-%m-%d %H:%M:%S') if payment.paid_time else ''))
         except Exception as e:
             QMessageBox.critical(self, '错误', f'搜索失败：{str(e)}')
