@@ -695,7 +695,23 @@ class MainWindow(QMainWindow):
                 else:
                     self.payment_table.setItem(row, 5, QTableWidgetItem(f"{payment.billing_months} 月"))
                 self.payment_table.setItem(row, 6, QTableWidgetItem(f"{payment.paid_months} 月"))
-                self.payment_table.setItem(row, 7, QTableWidgetItem(self._fmt_amount_int(payment.amount)))
+                # 计算并显示按单位感知的金额（避免旧数据未正确计算时显示错误）
+                try:
+                    resident_area = float(payment.resident.area) if getattr(payment.resident, 'area', None) else 0.0
+                except Exception:
+                    resident_area = 0.0
+                try:
+                    calc_amount = ChargeService.calculate_amount(
+                        payment.charge_item,
+                        resident_area=resident_area,
+                        months=payment.billing_months if getattr(payment, 'billing_months', None) else 1,
+                        billing_start_date=payment.billing_start_date,
+                        billing_end_date=payment.billing_end_date,
+                        usage=getattr(payment, 'usage', None)
+                    )
+                except Exception:
+                    calc_amount = payment.amount or 0.0
+                self.payment_table.setItem(row, 7, QTableWidgetItem(self._fmt_amount_int(calc_amount)))
                 # 已缴金额列
                 self.payment_table.setItem(row, 8, QTableWidgetItem(self._fmt_amount_int(payment.paid_amount)))
                 # 缴费状态
