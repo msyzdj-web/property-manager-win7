@@ -2,6 +2,8 @@ name: Build and Release (Windows)
 
 on:
   push:
+    branches: [ main, master, fix/printer-safe-width-win ]
+  pull_request:
     branches: [ main, master ]
   workflow_dispatch:
 

@@ -1,12 +1,17 @@
 name: Build Windows 7 Compatible EXE (one-dir)
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
       - master
       - ci/onedir-artifact
+      - fix/printer-safe-width-win
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
 
 jobs:
   build-win7:
