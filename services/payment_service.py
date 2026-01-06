@@ -436,7 +436,12 @@ class PaymentService:
                     (ChargeItem.name.like(keyword_like))
                 )
             
-            return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
+            # Order search results by room number to produce a "natural" listing
+            # which matches the main list ordering users expect.
+            try:
+                return query.order_by(Resident.room_no, Payment.created_at.desc()).all()
+            except Exception:
+                return query.order_by(Payment.period.desc(), Payment.created_at.desc()).all()
         finally:
             if db is not None:
                 db.close()
