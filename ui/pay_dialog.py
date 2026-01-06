@@ -138,38 +138,10 @@ class PayDialog(QDialog):
                 self.paid_months_input.setMaximum(remaining_months)
                 if remaining_months > 0:
                     self.paid_months_input.setValue(1)
-
-            info_text = f\"住户: {getattr(payment.resident, 'full_room_no', payment.resident.room_no)} - {payment.resident.name}\\n\"\n+            info_text += f\"收费项目: {payment.charge_item.name}\\n\"\n+            info_text += f\"计费周期: {payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}\\n\"\n+            info_text += f\"总周期: {total_display}\\n\"\n+            info_text += f\"已缴费: {paid_display}\\n\"\n+            info_text += f\"剩余: {remaining_display}\\n\"\n+            info_text += f\"总金额: ¥{float(payment.amount):.2f}\"\n+            self.info_label.setText(info_text)\n+\n+            self.payment = payment\n+            self.calculate_paid_amount()
-        except Exception as e:
-            QMessageBox.critical(self, '错误', f'加载缴费记录失败：{str(e)}')
-            self.reject()
-    
-    def calculate_paid_amount(self):
-        """计算缴费金额"""
-        try:
-            if not hasattr(self, 'payment'):
-                return
-            # determine which input is visible (double input for degrees, spinbox otherwise)
-            unit = (self.payment.charge_item.unit or '').lower() if self.payment.charge_item else ''
-            price = float(self.payment.charge_item.price) if self.payment.charge_item and self.payment.charge_item.price is not None else 0.0
-
-            if '度' in unit and self.paid_double_input.isVisible():
-                units = float(self.paid_double_input.value())
-                paid_amount = price * units
-            else:
-                units = int(self.paid_months_input.value())
-                # if unit is hour/day/degree treated as units; otherwise months -> prorate
-                if '小时' in unit or '时' in unit or '天' in unit or '日' in unit or '度' in unit:
-                    paid_amount = price * units
-                else:
-                    # prorate by months
-                    try:
-                        monthly_amount = float(self.payment.amount) / self.payment.billing_months
-                    except Exception:
-                        monthly_amount = 0.0
-                    paid_amount = monthly_amount * units
-
-            self.amount_label.setText(f'缴费金额: ¥{paid_amount:.2f}')
+            info_text = (\n+                f\"住户: {getattr(payment.resident, 'full_room_no', payment.resident.room_no)} - {payment.resident.name}\\n\"\n+                f\"收费项目: {payment.charge_item.name}\\n\"\n+                f\"计费周期: {payment.billing_start_date.strftime('%Y-%m-%d')} 至 {payment.billing_end_date.strftime('%Y-%m-%d')}\\n\"\n+                f\"总周期: {total_display}\\n\"\n+                f\"已缴费: {paid_display}\\n\"\n+                f\"剩余: {remaining_display}\\n\"\n+                f\"总金额: ¥{float(payment.amount):.2f}\"\n+            )\n*** End Patch
+            self.info_label.setText(info_text)
+            self.payment = payment
+            self.calculate_paid_amount()
         except Exception as e:
             self.amount_label.setText('缴费金额: ¥0.00')
     
