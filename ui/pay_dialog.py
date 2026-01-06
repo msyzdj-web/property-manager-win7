@@ -170,12 +170,12 @@ class PayDialog(QDialog):
                 if paid_units_int <= 0:
                     QMessageBox.warning(self, '提示', '缴费数量必须大于0')
                     return
-                # if unit is month-like, pass as paid_months; else pass as paid_units
+                # if unit is hour/day, pass as paid_units; else pass as paid_months
                 if ('小时' in unit or '时' in unit) or ('天' in unit or '日' in unit):
-                PaymentService.mark_paid(self.payment_id, paid_units=paid_units_int, operator='管理员')
-                # compute unit label safely (avoid backslashes/quotes inside f-string expression)
-                unit_label = '小时' if ('小时' in unit or '时' in unit) else '天'
-                QMessageBox.information(self, '成功', f'缴费成功（{paid_units_int} {unit_label}）')
+                    PaymentService.mark_paid(self.payment_id, paid_units=paid_units_int, operator='管理员')
+                    # compute unit label safely
+                    unit_label = '小时' if ('小时' in unit or '时' in unit) else '天'
+                    QMessageBox.information(self, '成功', f'缴费成功（{paid_units_int} {unit_label}）')
                 else:
                     PaymentService.mark_paid(self.payment_id, paid_months=paid_units_int, operator='管理员')
                     QMessageBox.information(self, '成功', f'缴费成功（{paid_units_int} 个月）')
